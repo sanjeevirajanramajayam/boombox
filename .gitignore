@@ -1,0 +1,5 @@
+node_modules/
+.boombox-cache/
+.test-boombox-cache/
+.test-cassettes/
+*.log

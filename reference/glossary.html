@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Reference: HTTP Caching Glossary</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header>
+    <h1>HTTP Caching Glossary</h1>
+    <div class="subtitle">Quick reference guide for core caching concepts & terminology.</div>
+  </header>
+
+  <main>
+    <h2>Core Concepts</h2>
+    <dl>
+      <dt><strong>Origin Server</strong></dt>
+      <dd>The upstream authoritative server that creates and hosts the definitive resource representations.</dd>
+
+      <dt><strong>Caching Proxy (Shared Cache)</strong></dt>
+      <dd>An intermediary server positioned between client and origin that retains response copies to serve future identical requests.</dd>
+
+      <dt><strong>Cache Hit</strong></dt>
+      <dd>When an incoming request matches a valid cached representation, returned directly without querying origin (<code>X-Cache: HIT</code>).</dd>
+
+      <dt><strong>Cache Miss</strong></dt>
+      <dd>When no valid entry exists for the request key, forcing the proxy to forward the request to origin (<code>X-Cache: MISS</code>).</dd>
+
+      <dt><strong>Cache Key</strong></dt>
+      <dd>The unique identifier used to look up cached items, typically constructed from the HTTP method and request URI.</dd>
+
+      <dt><strong>Freshness & TTL</strong></dt>
+      <dd>The duration during which a cached response can be served without revalidating against the origin server.</dd>
+    </dl>
+  </main>
+
+  <div class="footer">
+    <p>Part of the HTTP Caching & Proxy Architecture Course. Grounded in RFC 9111.</p>
+  </div>
+</body>
+</html>

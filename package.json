@@ -1,0 +1,17 @@
+{
+  "name": "boombox",
+  "version": "1.0.0",
+  "description": "A CLI caching proxy, VCR record/replay engine, and chaos simulator",
+  "main": "src/server.js",
+  "bin": {
+    "boombox": "./bin/boombox.js"
+  },
+  "type": "module",
+  "scripts": {
+    "start": "bun bin/boombox.js",
+    "test": "bun test"
+  },
+  "keywords": ["boombox", "caching", "proxy", "vcr", "chaos", "cli"],
+  "author": "",
+  "license": "MIT"
+}
