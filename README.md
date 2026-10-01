@@ -135,4 +135,4 @@ All tests execute end-to-end against live and simulated network conditions in $<
 
 ## License
 
-[MIT](LICENSE) © [Sanjeevirajan Ramajayam](https://github.com/sanjeevirajanramajayam)
+[MIT](LICENSE) © [Sanjeevi Rajan Ramajayam](https://github.com/sanjeevirajanramajayam)

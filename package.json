@@ -12,6 +12,6 @@
     "test": "bun test"
   },
   "keywords": ["boombox", "caching", "proxy", "vcr", "chaos", "cli"],
-  "author": "",
+  "author": "Sanjeevi Rajan Ramajayam",
   "license": "MIT"
 }

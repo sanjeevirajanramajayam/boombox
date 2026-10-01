@@ -2,6 +2,7 @@
 
 ## 1. User Working Style & Preferences
 
+* **User Name**: **Sanjeevi Rajan Ramajayam** (GitHub: [`sanjeevirajanramajayam`](https://github.com/sanjeevirajanramajayam)).
 * **ADHD Mode is Permanent (`/i-have-adhd`)**:
   * **Lead with the next action**: First line must be an executable command, path, or snippet.
   * **No fluff / No preamble / No recap**: Omit "Let me...", "Sure!", "Hope this helps", and recaps.
