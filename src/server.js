@@ -1,6 +1,7 @@
 
 import { CacheManager } from './cache.js';
 import { CassetteManager } from './vcr.js';
+import { ChaosEngine } from './chaos.js';
 
 const HOP_BY_HOP_HEADERS = new Set([
   'connection',
@@ -29,7 +30,11 @@ export function createProxyServer({
   cacheDir = '.boombox-cache',
   cassette = null,
   cassetteDir = 'cassettes',
-  mode = 'auto'
+  mode = 'auto',
+  latency = 0,
+  jitter = null,
+  flake = 0,
+  overrides = []
 } = {}) {
   if (!origin && mode !== 'replay') {
     throw new Error('Proxy requires an upstream origin URL (e.g. --origin http://example.com)');
@@ -38,6 +43,7 @@ export function createProxyServer({
   const normalizedOrigin = origin ? origin.replace(/\/+$/, '') : null;
   const cache = cassette ? null : new CacheManager(cacheDir);
   const vcr = cassette ? new CassetteManager({ cassetteName: cassette, cassetteDir, mode }) : null;
+  const chaos = new ChaosEngine({ latency, jitter, flake, overrides });
 
   const server = Bun.serve({
     port,
@@ -47,7 +53,15 @@ export function createProxyServer({
       const method = req.method.toUpperCase();
 
       // ==========================================
-      // PIPELINE BRANCH 1: VCR Service Virtualization
+      // PIPELINE STAGE 1: Chaos Simulation Middleware
+      // ==========================================
+      const chaosResponse = await chaos.evaluate(url.pathname);
+      if (chaosResponse) {
+        return chaosResponse;
+      }
+
+      // ==========================================
+      // PIPELINE STAGE 2: VCR Service Virtualization
       // ==========================================
       if (vcr) {
         if (mode === 'replay' || mode === 'auto') {
@@ -106,7 +120,6 @@ export function createProxyServer({
             }
           }
 
-          // Record track to cassette
           vcr.record(method, targetPath, {
             statusCode: originStatus,
             headers: outHeaders,
@@ -129,7 +142,7 @@ export function createProxyServer({
       }
 
       // ==========================================
-      // PIPELINE BRANCH 2: Core RFC 9111 Caching Proxy
+      // PIPELINE STAGE 3: Core RFC 9111 Caching Proxy
       // ==========================================
       const isCacheable = method === 'GET' || method === 'HEAD';
 
@@ -200,5 +213,5 @@ export function createProxyServer({
     }
   });
 
-  return { server, cache, vcr };
+  return { server, cache, vcr, chaos };
 }

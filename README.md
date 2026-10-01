@@ -89,7 +89,22 @@ bun bin/boombox.js --port 3000 --cassette stripe-tests --mode replay
 - Recorded routes return immediate stored responses with `X-Cache: REPLAY`.
 - Unrecorded routes fail fast with `502 Bad Gateway` and diagnostic JSON.
 
-### 4. Clear Cache
+### 4. Inject Chaos & Faults
+
+Simulate slow networks, erratic mobile latency, rate limits, and outages without modifying application code:
+
+```bash
+# Add 1.5s artificial latency and 20% flake error rate
+bun bin/boombox.js --port 3000 --origin http://dummyjson.com --latency 1500 --flake 20
+
+# Simulate erratic 4G mobile jitter between 100ms and 500ms
+bun bin/boombox.js --port 3000 --origin http://dummyjson.com --jitter 100-500
+
+# Force deterministic rate limit (429) on checkout
+bun bin/boombox.js --port 3000 --origin http://dummyjson.com --override /checkout:429
+```
+
+### 5. Clear Cache
 
 Purge all stored cache files:
 
@@ -107,8 +122,13 @@ bun bin/boombox.js --clear-cache
 | `--origin` | `<url>` | Target upstream host URL (e.g. `http://dummyjson.com`) |
 | `--cassette` | `<name>` | Named VCR tape to record to or replay from |
 | `--mode` | `auto\|record\|replay` | VCR execution mode (default: `auto`) |
+| `--latency` | `<ms>` | Synthetic delay in milliseconds |
+| `--jitter` | `<min-max>` | Randomized latency variance range in milliseconds |
+| `--flake` | `<percent>` | Probability (0-100%) of injecting HTTP 500 errors |
+| `--override` | `<path:status>` | Force target path to return HTTP status code (e.g. `/cart:429`) |
 | `--clear-cache` | — | Purge all cached response fixtures from disk |
 | `--help, -h` | — | Display the CLI help manual |
+
 
 ---
 

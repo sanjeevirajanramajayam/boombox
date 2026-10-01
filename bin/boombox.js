@@ -8,12 +8,13 @@ const args = process.argv.slice(2);
 
 function printHelp() {
   console.log(`
-Boombox 📻 - Caching Proxy & VCR Service Virtualization CLI
+Boombox 📻 - Caching Proxy, VCR Service Virtualization & Chaos Simulator CLI
 
 Usage:
   boombox --port <number> --origin <url>             Start core caching proxy server
   boombox --clear-cache                              Purge all cached responses
   boombox --cassette <name> [--mode <mode>]          Run with VCR tape isolation
+  boombox [chaos options]                            Inject transport-level faults
   boombox --help, -h                                 Display this help manual
 
 VCR Modes (--mode):
@@ -21,10 +22,18 @@ VCR Modes (--mode):
   record            Always fetch from origin and record/update tape tracks.
   replay            100% offline playback. Zero external network calls.
 
+Chaos & Resilience Options:
+  --latency <ms>             Add synthetic delay in milliseconds (e.g. 1500)
+  --jitter <min-max>         Add randomized latency variance range in ms (e.g. 100-500)
+  --flake <percent>          Inject randomized 500 errors on X% of requests (e.g. 20)
+  --override <path:status>   Force specific route to return HTTP status code (e.g. /checkout:429)
+
 Examples:
   boombox --port 3000 --origin http://dummyjson.com
   boombox --port 3000 --origin https://api.stripe.com --cassette stripe-test --mode record
   boombox --port 3000 --cassette stripe-test --mode replay
+  boombox --port 3000 --origin http://dummyjson.com --latency 1500 --flake 25
+  boombox --port 3000 --origin http://dummyjson.com --override /checkout:429
   boombox --clear-cache
 `);
 }
@@ -45,6 +54,10 @@ let port = 3000;
 let origin = null;
 let cassette = null;
 let mode = 'auto';
+let latency = 0;
+let jitter = null;
+let flake = 0;
+const overrides = [];
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--port' && args[i + 1]) {
@@ -73,6 +86,26 @@ for (let i = 0; i < args.length; i++) {
       process.exit(1);
     }
     i++;
+  } else if (args[i] === '--latency' && args[i + 1]) {
+    latency = parseInt(args[i + 1], 10);
+    if (isNaN(latency) || latency < 0) {
+      console.error('Error: --latency must be a non-negative integer in milliseconds.');
+      process.exit(1);
+    }
+    i++;
+  } else if (args[i] === '--jitter' && args[i + 1]) {
+    jitter = args[i + 1].trim();
+    i++;
+  } else if (args[i] === '--flake' && args[i + 1]) {
+    flake = parseFloat(args[i + 1]);
+    if (isNaN(flake) || flake < 0 || flake > 100) {
+      console.error('Error: --flake must be a percentage between 0 and 100.');
+      process.exit(1);
+    }
+    i++;
+  } else if (args[i] === '--override' && args[i + 1]) {
+    overrides.push(args[i + 1].trim());
+    i++;
   }
 }
 
@@ -82,7 +115,17 @@ if (!origin && mode !== 'replay') {
   process.exit(1);
 }
 
-const { server } = createProxyServer({ port, origin, cassette, mode });
+const { server } = createProxyServer({
+  port,
+  origin,
+  cassette,
+  mode,
+  latency,
+  jitter,
+  flake,
+  overrides
+});
+
 console.log(`📻 Boombox proxy running at http://localhost:${server.port}`);
 if (origin) console.log(`↳ Upstream origin: ${origin}`);
 if (cassette) {
@@ -90,3 +133,7 @@ if (cassette) {
 } else {
   console.log(`↳ Local cache: .boombox-cache/`);
 }
+if (latency > 0) console.log(`⚡ Chaos Latency: +${latency}ms`);
+if (jitter) console.log(`⚡ Chaos Jitter: ${jitter}ms`);
+if (flake > 0) console.log(`⚡ Chaos Flake Rate: ${flake}% (HTTP 500)`);
+if (overrides.length > 0) console.log(`⚡ Chaos Route Overrides: ${overrides.join(', ')}`);
