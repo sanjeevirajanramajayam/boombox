@@ -3,39 +3,9 @@ import { CacheManager } from './cache.js';
 import { CassetteManager } from './vcr.js';
 import { ChaosEngine } from './chaos.js';
 import { ProxyTelemetry } from './dashboard.js';
+import { OriginTransport, filterHeaders, isBinaryContentType, HOP_BY_HOP_HEADERS } from './transport.js';
 
-const HOP_BY_HOP_HEADERS = new Set([
-  'connection',
-  'keep-alive',
-  'proxy-authenticate',
-  'proxy-authorization',
-  'te',
-  'trailer',
-  'transfer-encoding',
-  'upgrade'
-]);
-
-export function filterHeaders(headers) {
-  const filtered = {};
-  for (const [key, value] of Object.entries(headers)) {
-    if (!HOP_BY_HOP_HEADERS.has(key.toLowerCase())) {
-      filtered[key] = value;
-    }
-  }
-  return filtered;
-}
-
-export function isBinaryContentType(contentType) {
-  if (!contentType) return false;
-  const ct = contentType.toLowerCase();
-  return ct.startsWith('image/') ||
-         ct.startsWith('audio/') ||
-         ct.startsWith('video/') ||
-         ct.includes('octet-stream') ||
-         ct.includes('pdf') ||
-         ct.includes('zip') ||
-         ct.includes('gzip');
-}
+export { filterHeaders, isBinaryContentType, HOP_BY_HOP_HEADERS, OriginTransport };
 
 export function createProxyServer({
   port = 3000,
@@ -56,6 +26,7 @@ export function createProxyServer({
   }
 
   const normalizedOrigin = origin ? origin.replace(/\/+$/, '') : null;
+  const transport = normalizedOrigin ? new OriginTransport({ origin: normalizedOrigin, redirect: 'follow' }) : null;
   const cache = cassette ? null : new CacheManager(cacheDir);
   const vcr = cassette ? new CassetteManager({ cassetteName: cassette, cassetteDir, mode, redact, matchBody }) : null;
   const chaos = new ChaosEngine({ latency, jitter, flake, overrides });
@@ -139,61 +110,33 @@ export function createProxyServer({
         }
 
         try {
-          const forwardHeaders = new Headers();
-          for (const [key, value] of req.headers.entries()) {
-            if (!HOP_BY_HOP_HEADERS.has(key.toLowerCase()) && key.toLowerCase() !== 'host') {
-              forwardHeaders.set(key, value);
-            }
-          }
-          if (normalizedOrigin) {
-            forwardHeaders.set('host', new URL(normalizedOrigin).host);
-          }
-
-          const fetchOptions = {
+          const upstream = await transport.forward({
             method,
-            headers: forwardHeaders,
-            redirect: 'follow'
-          };
-
-          if (requestBodyText) {
-            fetchOptions.body = requestBodyText;
-          }
-
-          const originResponse = await fetch(`${normalizedOrigin}${targetPath}`, fetchOptions);
-          const originStatus = originResponse.status;
-
-          const outHeaders = {};
-          for (const [k, v] of originResponse.headers.entries()) {
-            if (!HOP_BY_HOP_HEADERS.has(k.toLowerCase()) && k.toLowerCase() !== 'content-encoding') {
-              outHeaders[k] = v;
-            }
-          }
-
-          const originArrayBuffer = await originResponse.arrayBuffer();
-          const originBuffer = Buffer.from(originArrayBuffer);
-          const isBinary = isBinaryContentType(outHeaders['content-type'] || outHeaders['Content-Type']);
-          const serializedBody = isBinary ? originBuffer.toString('base64') : originBuffer.toString('utf8');
+            path: targetPath,
+            headers: req.headers,
+            bodyText: requestBodyText
+          });
 
           vcr.record(method, targetPath, {
-            statusCode: originStatus,
-            headers: outHeaders,
-            body: serializedBody,
-            isBase64: isBinary
+            statusCode: upstream.statusCode,
+            headers: upstream.headers,
+            body: upstream.serializedBody,
+            isBase64: upstream.isBase64
           }, requestBodyText);
 
-          const clientHeaders = new Headers(outHeaders);
+          const clientHeaders = new Headers(upstream.headers);
           clientHeaders.set('X-Cache', 'RECORD');
 
           telemetry.record({
             method,
             path: targetPath,
-            status: originStatus,
+            status: upstream.statusCode,
             cacheSignal: 'RECORD',
             durationMs: performance.now() - startTime
           });
 
-          return new Response(method === 'HEAD' ? null : originBuffer, {
-            status: originStatus,
+          return new Response(method === 'HEAD' ? null : upstream.buffer, {
+            status: upstream.statusCode,
             headers: clientHeaders
           });
         } catch (err) {
@@ -205,7 +148,7 @@ export function createProxyServer({
             durationMs: performance.now() - startTime
           });
 
-          return new Response(`502 Bad Gateway: VCR failed connecting to origin ${normalizedOrigin} - ${err.message}`, {
+          return new Response(err.message, {
             status: 502,
             headers: { 'Content-Type': 'text/plain', 'X-Cache': 'MISS' }
           });
@@ -278,62 +221,36 @@ export function createProxyServer({
       }
 
       try {
-        const forwardHeaders = new Headers();
-        for (const [key, value] of req.headers.entries()) {
-          if (!HOP_BY_HOP_HEADERS.has(key.toLowerCase()) && key.toLowerCase() !== 'host') {
-            forwardHeaders.set(key, value);
-          }
-        }
-        forwardHeaders.set('host', new URL(normalizedOrigin).host);
-
-        const fetchOptions = {
+        const upstream = await transport.forward({
           method,
-          headers: forwardHeaders,
-          redirect: 'follow'
-        };
+          path: targetPath,
+          headers: req.headers,
+          bodyText: requestBodyText
+        });
 
-        if (requestBodyText) {
-          fetchOptions.body = requestBodyText;
-        }
-
-        const originResponse = await fetch(`${normalizedOrigin}${targetPath}`, fetchOptions);
-        const originStatus = originResponse.status;
-
-        const outHeaders = {};
-        for (const [k, v] of originResponse.headers.entries()) {
-          if (!HOP_BY_HOP_HEADERS.has(k.toLowerCase()) && k.toLowerCase() !== 'content-encoding') {
-            outHeaders[k] = v;
-          }
-        }
-
-        const originArrayBuffer = await originResponse.arrayBuffer();
-        const originBuffer = Buffer.from(originArrayBuffer);
-        const isBinary = isBinaryContentType(outHeaders['content-type'] || outHeaders['Content-Type']);
-        const serializedBody = isBinary ? originBuffer.toString('base64') : originBuffer.toString('utf8');
-
-        if (isCacheable && originStatus >= 200 && originStatus < 300) {
+        if (isCacheable && upstream.statusCode >= 200 && upstream.statusCode < 300) {
           cache.set(method, targetPath, {
-            statusCode: originStatus,
-            headers: outHeaders,
-            body: serializedBody,
-            isBase64: isBinary
+            statusCode: upstream.statusCode,
+            headers: upstream.headers,
+            body: upstream.serializedBody,
+            isBase64: upstream.isBase64
           }, requestBodyText, req.headers);
         }
 
-        const clientHeaders = new Headers(outHeaders);
+        const clientHeaders = new Headers(upstream.headers);
         const signal = isCacheable ? 'MISS' : 'BYPASS';
         clientHeaders.set('X-Cache', signal);
 
         telemetry.record({
           method,
           path: targetPath,
-          status: originStatus,
+          status: upstream.statusCode,
           cacheSignal: signal,
           durationMs: performance.now() - startTime
         });
 
-        return new Response(method === 'HEAD' ? null : originBuffer, {
-          status: originStatus,
+        return new Response(method === 'HEAD' ? null : upstream.buffer, {
+          status: upstream.statusCode,
           headers: clientHeaders
         });
       } catch (err) {
@@ -345,7 +262,7 @@ export function createProxyServer({
           durationMs: performance.now() - startTime
         });
 
-        return new Response(`502 Bad Gateway: Unable to connect to origin ${normalizedOrigin} - ${err.message}`, {
+        return new Response(err.message, {
           status: 502,
           headers: { 'Content-Type': 'text/plain', 'X-Cache': 'MISS' }
         });
@@ -353,5 +270,5 @@ export function createProxyServer({
     }
   });
 
-  return { server, cache, vcr, chaos, telemetry };
+  return { server, cache, vcr, chaos, telemetry, transport };
 }
