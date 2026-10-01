@@ -3,13 +3,96 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 
-export class CacheManager {
-  constructor(cacheDir = '.boombox-cache', { maxSizeBytes = null } = {}) {
+export function createStorageMatch({
+  statusCode,
+  headers,
+  body,
+  isBase64 = false,
+  cachedAt = new Date().toISOString(),
+  etag = null,
+  lastModified = null,
+  signal = 'HIT',
+  isOfflineMiss = false,
+  errorMessage = null,
+  maxAge = null,
+  staleWhileRevalidate = null
+}) {
+  return {
+    statusCode,
+    headers,
+    body,
+    isBase64: Boolean(isBase64),
+    cachedAt,
+    etag,
+    lastModified,
+    signal,
+    isOfflineMiss: Boolean(isOfflineMiss),
+    errorMessage,
+    maxAge,
+    staleWhileRevalidate
+  };
+}
+
+export class DiskCacheAdapter {
+  constructor(dirOrOptions = '.boombox-cache', maybeOptions = {}) {
+    let cacheDir = '.boombox-cache';
+    let maxSizeBytes = null;
+    let matchBody = false;
+
+    if (typeof dirOrOptions === 'object' && dirOrOptions !== null) {
+      cacheDir = dirOrOptions.cacheDir || '.boombox-cache';
+      maxSizeBytes = dirOrOptions.maxSizeBytes ?? null;
+      matchBody = Boolean(dirOrOptions.matchBody);
+    } else {
+      cacheDir = dirOrOptions || '.boombox-cache';
+      maxSizeBytes = maybeOptions.maxSizeBytes ?? null;
+      matchBody = Boolean(maybeOptions.matchBody);
+    }
+
     this.cacheDir = cacheDir;
     this.maxSizeBytes = maxSizeBytes ? parseInt(maxSizeBytes, 10) : null;
+    this.matchBody = matchBody;
+
     if (!existsSync(this.cacheDir)) {
       mkdirSync(this.cacheDir, { recursive: true });
     }
+  }
+
+  isCacheable(method) {
+    const m = method.toUpperCase();
+    return m === 'GET' || m === 'HEAD' || (this.matchBody && m === 'POST');
+  }
+
+  lookup({ method, path, headers, bodyText = null }) {
+    if (!this.isCacheable(method)) return null;
+
+    const entry = this.get(method, path, bodyText, headers);
+    if (!entry) return null;
+
+    return createStorageMatch({
+      statusCode: entry.statusCode,
+      headers: entry.headers,
+      body: entry.body,
+      isBase64: entry.isBase64,
+      cachedAt: entry.cachedAt,
+      etag: entry.etag,
+      lastModified: entry.lastModified,
+      maxAge: entry.maxAge,
+      staleWhileRevalidate: entry.staleWhileRevalidate,
+      signal: 'HIT'
+    });
+  }
+
+  store({ method, path, headers, bodyText = null, response }) {
+    if (!this.isCacheable(method)) return;
+    if (response.statusCode < 200 || response.statusCode >= 300) return;
+
+    this.set(method, path, {
+      statusCode: response.statusCode,
+      headers: response.headers,
+      body: response.serializedBody,
+      isBase64: response.isBase64
+    }, bodyText, headers);
   }
 
   normalizeUrl(rawUrl) {
@@ -180,20 +263,33 @@ export class CacheManager {
     this.evictIfNecessary();
   }
 
-  touch(method, rawUrl, requestBody = null, requestHeaders = null) {
-    const key = this.computeKey(method, rawUrl, requestBody);
+  touch(firstArg, rawUrl = null, requestBody = null, requestHeaders = null) {
+    let method, path, body, headers;
+    if (typeof firstArg === 'object' && firstArg !== null) {
+      method = firstArg.method;
+      path = firstArg.path;
+      body = firstArg.bodyText ?? null;
+      headers = firstArg.headers ?? null;
+    } else {
+      method = firstArg;
+      path = rawUrl;
+      body = requestBody;
+      headers = requestHeaders;
+    }
+
+    const key = this.computeKey(method, path, body);
     const filePath = join(this.cacheDir, `${key}.json`);
 
     if (!existsSync(filePath)) return;
 
     try {
       const data = JSON.parse(readFileSync(filePath, 'utf8'));
-      if (Array.isArray(data.variants) && Array.isArray(data.vary) && requestHeaders) {
+      if (Array.isArray(data.variants) && Array.isArray(data.vary) && headers) {
         const variant = data.variants.find(v => {
           return data.vary.every(headerName => {
-            const incoming = requestHeaders instanceof Headers
-              ? requestHeaders.get(headerName)
-              : (requestHeaders[headerName] || requestHeaders[headerName.toLowerCase()] || null);
+            const incoming = headers instanceof Headers
+              ? headers.get(headerName)
+              : (headers[headerName] || headers[headerName.toLowerCase()] || null);
             return (v.varyMap?.[headerName] || null) === (incoming || null);
           });
         });
@@ -262,3 +358,6 @@ export class CacheManager {
     return readdirSync(this.cacheDir).filter(f => f.endsWith('.json')).length;
   }
 }
+
+export const CacheManager = DiskCacheAdapter;
+

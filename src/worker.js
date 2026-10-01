@@ -1,6 +1,7 @@
 
 import { ChaosEngine } from './chaos.js';
-import { HOP_BY_HOP_HEADERS, filterHeaders } from './transport.js';
+import { ProxyPipeline } from './pipeline.js';
+import { createStorageMatch } from './cache.js';
 
 export class InMemoryEdgeCache {
   constructor() {
@@ -25,11 +26,60 @@ export class InMemoryEdgeCache {
   }
 }
 
+export class EdgeCacheAdapter {
+  constructor(cache) {
+    this.cache = cache;
+  }
+
+  isCacheable(method) {
+    const m = method.toUpperCase();
+    return m === 'GET' || m === 'HEAD';
+  }
+
+  async lookup({ method, path, request }) {
+    if (!this.isCacheable(method)) return null;
+    const key = request || path;
+    const matched = await this.cache.match(key);
+    if (!matched) return null;
+
+    const headers = {};
+    for (const [k, v] of matched.headers.entries()) {
+      headers[k] = v;
+    }
+
+    const body = await matched.text();
+    return createStorageMatch({
+      statusCode: matched.status,
+      headers,
+      body,
+      signal: 'HIT'
+    });
+  }
+
+  async store({ method, path, request, response }) {
+    if (!this.isCacheable(method)) return;
+    if (response.statusCode < 200 || response.statusCode >= 300) return;
+
+    const key = request || path;
+    const res = new Response(response.serializedBody || response.buffer, {
+      status: response.statusCode,
+      headers: response.headers
+    });
+
+    await this.cache.put(key, res);
+  }
+
+  isFresh() {
+    return true;
+  }
+
+  touch() {}
+}
+
 const fallbackEdgeCache = new InMemoryEdgeCache();
 
 export default {
   async fetch(request, env = {}, ctx = {}) {
-    // 1. Validate upstream origin configuration
     if (!env.ORIGIN) {
       return Response.json({
         error: 'ORIGIN_NOT_CONFIGURED',
@@ -37,9 +87,9 @@ export default {
       }, { status: 500 });
     }
 
-    const requestUrl = new URL(request.url);
+    const rawCache = env.CACHE || (typeof caches !== 'undefined' && caches.default ? caches.default : fallbackEdgeCache);
+    const storage = new EdgeCacheAdapter(rawCache);
 
-    // 2. Evaluate Edge Chaos Fault Injection
     const chaos = new ChaosEngine({
       latency: env.CHAOS_LATENCY,
       jitter: env.CHAOS_JITTER,
@@ -47,89 +97,13 @@ export default {
       overrides: env.CHAOS_OVERRIDE
     });
 
-    const chaosResponse = await chaos.evaluate(requestUrl.pathname);
-    if (chaosResponse) {
-      return chaosResponse;
-    }
-
-    // 3. Resolve Edge Cache instance
-    const edgeCache = env.CACHE || (typeof caches !== 'undefined' && caches.default ? caches.default : fallbackEdgeCache);
-    const method = request.method.toUpperCase();
-    const isCacheable = method === 'GET' || method === 'HEAD';
-
-    // 4. Edge Cache Lookup
-    if (isCacheable) {
-      const cached = await edgeCache.match(request);
-      if (cached) {
-        const hitHeaders = new Headers(cached.headers);
-        hitHeaders.set('X-Cache', 'HIT');
-        return new Response(cached.body, {
-          status: cached.status,
-          statusText: cached.statusText,
-          headers: hitHeaders
-        });
-      }
-    }
-
-    // 5. Origin Forwarding
-    const originBase = env.ORIGIN.replace(/\/+$/, '');
-    const targetUrl = `${originBase}${requestUrl.pathname}${requestUrl.search}`;
-
-    const forwardHeaders = new Headers();
-    for (const [key, value] of request.headers.entries()) {
-      const lower = key.toLowerCase();
-      if (!HOP_BY_HOP_HEADERS.has(lower) && lower !== 'host') {
-        forwardHeaders.set(key, value);
-      }
-    }
-    forwardHeaders.set('host', new URL(originBase).host);
-
-    const init = {
-      method,
-      headers: forwardHeaders,
-      redirect: 'follow'
-    };
-
-    if (method !== 'GET' && method !== 'HEAD') {
-      init.body = request.body;
-    }
-
-    let originResponse;
-    try {
-      originResponse = await fetch(targetUrl, init);
-    } catch (err) {
-      return Response.json({
-        error: 'BAD_GATEWAY',
-        message: `Failed to connect to upstream origin: ${err.message}`
-      }, { status: 502 });
-    }
-
-    // 6. Build Client Response & Cache Storage
-    const responseHeaders = new Headers();
-    for (const [k, v] of originResponse.headers.entries()) {
-      const lower = k.toLowerCase();
-      if (!HOP_BY_HOP_HEADERS.has(lower) && lower !== 'content-encoding') {
-        responseHeaders.set(k, v);
-      }
-    }
-    responseHeaders.set('X-Cache', 'MISS');
-
-    const clientResponse = new Response(originResponse.body, {
-      status: originResponse.status,
-      statusText: originResponse.statusText,
-      headers: responseHeaders
+    const pipeline = new ProxyPipeline({
+      origin: env.ORIGIN,
+      storage,
+      chaos
     });
 
-    if (isCacheable && originResponse.status >= 200 && originResponse.status < 300) {
-      const cacheResponse = clientResponse.clone();
-      const putPromise = edgeCache.put(request, cacheResponse);
-      if (ctx && typeof ctx.waitUntil === 'function') {
-        ctx.waitUntil(putPromise);
-      } else {
-        await putPromise;
-      }
-    }
-
-    return clientResponse;
+    return pipeline.dispatch(request, ctx);
   }
 };
+
