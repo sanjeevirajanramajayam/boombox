@@ -15,6 +15,7 @@ Usage:
   boombox --clear-cache                              Purge all cached responses
   boombox --cassette <name> [--mode <mode>]          Run with VCR tape isolation
   boombox [chaos options]                            Inject transport-level faults
+  boombox --dashboard, --ui                          Launch live interactive terminal UI
   boombox --help, -h                                 Display this help manual
 
 VCR Modes (--mode):
@@ -22,11 +23,14 @@ VCR Modes (--mode):
   record            Always fetch from origin and record/update tape tracks.
   replay            100% offline playback. Zero external network calls.
 
-Chaos & Resilience Options:
+Advanced & Chaos Options:
+  --redact <header>          Mask sensitive header with [REDACTED] in cassettes
+  --match-body               Enable body-aware matching for GraphQL and JSON-RPC
   --latency <ms>             Add synthetic delay in milliseconds (e.g. 1500)
   --jitter <min-max>         Add randomized latency variance range in ms (e.g. 100-500)
   --flake <percent>          Inject randomized 500 errors on X% of requests (e.g. 20)
   --override <path:status>   Force specific route to return HTTP status code (e.g. /checkout:429)
+  --dashboard, --ui          Display live ANSI telemetry dashboard
 
 Examples:
   boombox --port 3000 --origin http://dummyjson.com
@@ -34,6 +38,7 @@ Examples:
   boombox --port 3000 --cassette stripe-test --mode replay
   boombox --port 3000 --origin http://dummyjson.com --latency 1500 --flake 25
   boombox --port 3000 --origin http://dummyjson.com --override /checkout:429
+  boombox --port 3000 --origin http://dummyjson.com --dashboard
   boombox --clear-cache
 `);
 }
@@ -57,7 +62,10 @@ let mode = 'auto';
 let latency = 0;
 let jitter = null;
 let flake = 0;
+let matchBody = false;
+let showDashboard = false;
 const overrides = [];
+const redact = [];
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--port' && args[i + 1]) {
@@ -106,6 +114,13 @@ for (let i = 0; i < args.length; i++) {
   } else if (args[i] === '--override' && args[i + 1]) {
     overrides.push(args[i + 1].trim());
     i++;
+  } else if (args[i] === '--redact' && args[i + 1]) {
+    redact.push(args[i + 1].trim());
+    i++;
+  } else if (args[i] === '--match-body') {
+    matchBody = true;
+  } else if (args[i] === '--dashboard' || args[i === '--ui']) {
+    showDashboard = true;
   }
 }
 
@@ -115,7 +130,7 @@ if (!origin && mode !== 'replay') {
   process.exit(1);
 }
 
-const { server } = createProxyServer({
+const { server, telemetry } = createProxyServer({
   port,
   origin,
   cassette,
@@ -123,17 +138,26 @@ const { server } = createProxyServer({
   latency,
   jitter,
   flake,
-  overrides
+  overrides,
+  redact,
+  matchBody
 });
 
-console.log(`📻 Boombox proxy running at http://localhost:${server.port}`);
-if (origin) console.log(`↳ Upstream origin: ${origin}`);
-if (cassette) {
-  console.log(`📼 VCR Active: cassette "${cassette}" (mode: ${mode.toUpperCase()})`);
+if (showDashboard) {
+  setInterval(() => {
+    console.clear();
+    console.log(telemetry.render());
+  }, 1000);
 } else {
-  console.log(`↳ Local cache: .boombox-cache/`);
+  console.log(`📻 Boombox proxy running at http://localhost:${server.port}`);
+  if (origin) console.log(`↳ Upstream origin: ${origin}`);
+  if (cassette) {
+    console.log(`📼 VCR Active: cassette "${cassette}" (mode: ${mode.toUpperCase()})`);
+  } else {
+    console.log(`↳ Local cache: .boombox-cache/`);
+  }
+  if (latency > 0) console.log(`⚡ Chaos Latency: +${latency}ms`);
+  if (jitter) console.log(`⚡ Chaos Jitter: ${jitter}ms`);
+  if (flake > 0) console.log(`⚡ Chaos Flake Rate: ${flake}% (HTTP 500)`);
+  if (overrides.length > 0) console.log(`⚡ Chaos Route Overrides: ${overrides.join(', ')}`);
 }
-if (latency > 0) console.log(`⚡ Chaos Latency: +${latency}ms`);
-if (jitter) console.log(`⚡ Chaos Jitter: ${jitter}ms`);
-if (flake > 0) console.log(`⚡ Chaos Flake Rate: ${flake}% (HTTP 500)`);
-if (overrides.length > 0) console.log(`⚡ Chaos Route Overrides: ${overrides.join(', ')}`);

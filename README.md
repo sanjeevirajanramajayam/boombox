@@ -122,12 +122,16 @@ bun bin/boombox.js --clear-cache
 | `--origin` | `<url>` | Target upstream host URL (e.g. `http://dummyjson.com`) |
 | `--cassette` | `<name>` | Named VCR tape to record to or replay from |
 | `--mode` | `auto\|record\|replay` | VCR execution mode (default: `auto`) |
+| `--redact` | `<header>` | Mask sensitive header with `[REDACTED]` in cassettes |
+| `--match-body` | — | Enable request body hashing for GraphQL and JSON-RPC |
 | `--latency` | `<ms>` | Synthetic delay in milliseconds |
 | `--jitter` | `<min-max>` | Randomized latency variance range in milliseconds |
 | `--flake` | `<percent>` | Probability (0-100%) of injecting HTTP 500 errors |
 | `--override` | `<path:status>` | Force target path to return HTTP status code (e.g. `/cart:429`) |
+| `--dashboard, --ui` | — | Launch real-time interactive terminal telemetry dashboard |
 | `--clear-cache` | — | Purge all cached response fixtures from disk |
 | `--help, -h` | — | Display the CLI help manual |
+
 
 
 ---
