@@ -3,6 +3,7 @@
 
 import { createProxyServer } from '../src/server.js';
 import { CacheManager } from '../src/cache.js';
+import { startInteractiveDashboard } from '../src/dashboard.js';
 
 const args = process.argv.slice(2);
 
@@ -119,7 +120,7 @@ for (let i = 0; i < args.length; i++) {
     i++;
   } else if (args[i] === '--match-body') {
     matchBody = true;
-  } else if (args[i] === '--dashboard' || args[i === '--ui']) {
+  } else if (args[i] === '--dashboard' || args[i] === '--ui') {
     showDashboard = true;
   }
 }
@@ -130,7 +131,7 @@ if (!origin && mode !== 'replay') {
   process.exit(1);
 }
 
-const { server, telemetry } = createProxyServer({
+const { server, cache, telemetry } = createProxyServer({
   port,
   origin,
   cassette,
@@ -144,10 +145,7 @@ const { server, telemetry } = createProxyServer({
 });
 
 if (showDashboard) {
-  setInterval(() => {
-    console.clear();
-    console.log(telemetry.render());
-  }, 1000);
+  startInteractiveDashboard({ telemetry, cache });
 } else {
   console.log(`📻 Boombox proxy running at http://localhost:${server.port}`);
   if (origin) console.log(`↳ Upstream origin: ${origin}`);
