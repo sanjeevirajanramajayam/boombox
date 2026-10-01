@@ -3,3 +3,10 @@ node_modules/
 .test-boombox-cache/
 .test-cassettes/
 *.log
+
+# Learning materials & personal notes
+lessons/
+learning-records/
+NOTES.md
+assets/
+reference/
