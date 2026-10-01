@@ -68,6 +68,8 @@ let showDashboard = false;
 const overrides = [];
 const redact = [];
 
+let maxSizeBytes = null;
+
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--port' && args[i + 1]) {
     port = parseInt(args[i + 1], 10);
@@ -118,6 +120,14 @@ for (let i = 0; i < args.length; i++) {
   } else if (args[i] === '--redact' && args[i + 1]) {
     redact.push(args[i + 1].trim());
     i++;
+  } else if (args[i] === '--max-size' && args[i + 1]) {
+    const mb = parseInt(args[i + 1], 10);
+    if (isNaN(mb) || mb <= 0) {
+      console.error('Error: --max-size must be a positive integer in megabytes.');
+      process.exit(1);
+    }
+    maxSizeBytes = mb * 1024 * 1024;
+    i++;
   } else if (args[i] === '--match-body') {
     matchBody = true;
   } else if (args[i] === '--dashboard' || args[i] === '--ui') {
@@ -141,7 +151,8 @@ const { server, cache, telemetry } = createProxyServer({
   flake,
   overrides,
   redact,
-  matchBody
+  matchBody,
+  maxSizeBytes
 });
 
 if (showDashboard) {

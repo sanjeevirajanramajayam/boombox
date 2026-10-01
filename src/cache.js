@@ -1,11 +1,12 @@
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync, statSync, unlinkSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 
 export class CacheManager {
-  constructor(cacheDir = '.boombox-cache') {
+  constructor(cacheDir = '.boombox-cache', { maxSizeBytes = null } = {}) {
     this.cacheDir = cacheDir;
+    this.maxSizeBytes = maxSizeBytes ? parseInt(maxSizeBytes, 10) : null;
     if (!existsSync(this.cacheDir)) {
       mkdirSync(this.cacheDir, { recursive: true });
     }
@@ -46,12 +47,26 @@ export class CacheManager {
     return match ? parseInt(match[1], 10) : null;
   }
 
+  parseStaleWhileRevalidate(cacheControlHeader) {
+    if (!cacheControlHeader || typeof cacheControlHeader !== 'string') return null;
+    const match = cacheControlHeader.match(/stale-while-revalidate\s*=\s*(\d+)/i);
+    return match ? parseInt(match[1], 10) : null;
+  }
+
   isFresh(entry) {
     if (!entry || !entry.cachedAt) return false;
     if (entry.maxAge === null || entry.maxAge === undefined) return true;
 
     const ageSeconds = (Date.now() - new Date(entry.cachedAt).getTime()) / 1000;
     return ageSeconds < entry.maxAge;
+  }
+
+  isStaleWhileRevalidate(entry) {
+    if (!entry || !entry.cachedAt || entry.maxAge === null || entry.maxAge === undefined) return false;
+    if (!entry.staleWhileRevalidate) return false;
+
+    const ageSeconds = (Date.now() - new Date(entry.cachedAt).getTime()) / 1000;
+    return ageSeconds >= entry.maxAge && ageSeconds < (entry.maxAge + entry.staleWhileRevalidate);
   }
 
   get(method, rawUrl, requestBody = null, requestHeaders = null) {
@@ -82,6 +97,10 @@ export class CacheManager {
         return matched || null;
       }
 
+      try {
+        utimesSync(filePath, new Date(), new Date());
+      } catch {}
+
       return data;
     } catch {
       return null;
@@ -104,6 +123,7 @@ export class CacheManager {
       body,
       isBase64: Boolean(isBase64),
       maxAge: this.parseMaxAge(cacheControl),
+      staleWhileRevalidate: this.parseStaleWhileRevalidate(cacheControl),
       etag,
       lastModified,
       cachedAt: new Date().toISOString()
@@ -156,6 +176,8 @@ export class CacheManager {
       };
       writeFileSync(filePath, JSON.stringify(entry, null, 2), 'utf8');
     }
+
+    this.evictIfNecessary();
   }
 
   touch(method, rawUrl, requestBody = null, requestHeaders = null) {
@@ -183,6 +205,47 @@ export class CacheManager {
       } else {
         data.cachedAt = new Date().toISOString();
         writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+      }
+    } catch {}
+  }
+
+  evictIfNecessary() {
+    if (!this.maxSizeBytes || this.maxSizeBytes <= 0) return;
+    if (!existsSync(this.cacheDir)) return;
+
+    try {
+      const files = readdirSync(this.cacheDir)
+        .filter(f => f.endsWith('.json'))
+        .map(name => {
+          const fullPath = join(this.cacheDir, name);
+          try {
+            const st = statSync(fullPath);
+            return {
+              name,
+              fullPath,
+              size: st.size,
+              mtimeMs: st.mtimeMs,
+              atimeMs: st.atimeMs
+            };
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean);
+
+      let totalSize = files.reduce((acc, f) => acc + f.size, 0);
+      if (totalSize <= this.maxSizeBytes) return;
+
+      // Sort by last accessed / modified time ascending (oldest first)
+      files.sort((a, b) => (a.mtimeMs || a.atimeMs) - (b.mtimeMs || b.atimeMs));
+
+      const targetWatermark = Math.floor(this.maxSizeBytes * 0.8);
+      for (const f of files) {
+        if (totalSize <= targetWatermark) break;
+        try {
+          unlinkSync(f.fullPath);
+          totalSize -= f.size;
+        } catch {}
       }
     } catch {}
   }

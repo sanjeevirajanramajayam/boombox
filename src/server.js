@@ -19,7 +19,8 @@ export function createProxyServer({
   flake = 0,
   overrides = [],
   redact = [],
-  matchBody = false
+  matchBody = false,
+  maxSizeBytes = null
 } = {}) {
   if (!origin && mode !== 'replay' && !cassette) {
     throw new Error('Proxy requires an upstream origin URL (e.g. --origin http://example.com)');
@@ -30,7 +31,7 @@ export function createProxyServer({
 
   const activeStorage = storage || (cassette
     ? new CassetteTapeAdapter({ cassetteName: cassette, cassetteDir, mode, redact, matchBody })
-    : new FileCacheAdapter({ cacheDir, matchBody }));
+    : new FileCacheAdapter({ cacheDir, matchBody, maxSizeBytes }));
 
   const chaos = new ChaosEngine({ latency, jitter, flake, overrides });
   const telemetry = new ProxyTelemetry({ origin: normalizedOrigin || '', mode: cassette ? mode : 'cache' });
@@ -107,6 +108,41 @@ export function createProxyServer({
             cacheSignal: cached.signal,
             durationMs: performance.now() - startTime
           });
+
+          return new Response(method === 'HEAD' ? null : cachedBody, {
+            status: cached.statusCode,
+            headers: resHeaders
+          });
+        }
+
+        if (activeStorage.isStaleWhileRevalidate?.(cached)) {
+          const resHeaders = new Headers(filterHeaders(cached.headers));
+          resHeaders.set('X-Cache', 'STALE');
+
+          telemetry.record({
+            method,
+            path: targetPath,
+            status: cached.statusCode,
+            cacheSignal: 'STALE',
+            durationMs: performance.now() - startTime
+          });
+
+          if (transport) {
+            transport.forward({
+              method,
+              path: targetPath,
+              headers: req.headers,
+              bodyText: requestBodyText
+            }).then(upstream => {
+              activeStorage.store({
+                method,
+                path: targetPath,
+                headers: req.headers,
+                bodyText: requestBodyText,
+                response: upstream
+              });
+            }).catch(() => {});
+          }
 
           return new Response(method === 'HEAD' ? null : cachedBody, {
             status: cached.statusCode,

@@ -20,6 +20,7 @@ export class CassetteManager {
     this.matchBody = Boolean(matchBody);
     this.filePath = join(this.cassetteDir, `${this.cassetteName}.json`);
     this.interactions = new Map();
+    this.playbackIndices = new Map();
 
     const customRedact = Array.isArray(redact) ? redact : [redact].filter(Boolean);
     this.redactHeadersSet = new Set([
@@ -67,13 +68,18 @@ export class CassetteManager {
   }
 
   load() {
+    this.interactions.clear();
+    this.playbackIndices.clear();
     if (existsSync(this.filePath)) {
       try {
         const raw = readFileSync(this.filePath, 'utf8');
         const data = JSON.parse(raw);
         for (const item of data) {
           const k = this.key(item.method, item.url, item.requestBody);
-          this.interactions.set(k, item);
+          if (!this.interactions.has(k)) {
+            this.interactions.set(k, []);
+          }
+          this.interactions.get(k).push(item);
         }
       } catch {
         this.interactions.clear();
@@ -82,7 +88,17 @@ export class CassetteManager {
   }
 
   match(method, rawUrl, requestBody = null) {
-    return this.interactions.get(this.key(method, rawUrl, requestBody));
+    const k = this.key(method, rawUrl, requestBody);
+    const sequence = this.interactions.get(k);
+    if (!sequence || sequence.length === 0) return null;
+
+    const currentIndex = this.playbackIndices.get(k) || 0;
+    const item = currentIndex < sequence.length 
+      ? sequence[currentIndex] 
+      : sequence[sequence.length - 1];
+
+    this.playbackIndices.set(k, currentIndex + 1);
+    return item;
   }
 
   sanitizeHeaders(headers) {
@@ -110,17 +126,24 @@ export class CassetteManager {
       recordedAt: new Date().toISOString()
     };
 
-    this.interactions.set(this.key(method, rawUrl, requestBody), item);
+    const k = this.key(method, rawUrl, requestBody);
+    if (!this.interactions.has(k)) {
+      this.interactions.set(k, []);
+    }
+    this.interactions.get(k).push(item);
     this.flush();
   }
 
-
   flush() {
-    const list = Array.from(this.interactions.values());
+    const list = Array.from(this.interactions.values()).flat();
     writeFileSync(this.filePath, JSON.stringify(list, null, 2), 'utf8');
   }
 
   count() {
-    return this.interactions.size;
+    let total = 0;
+    for (const list of this.interactions.values()) {
+      total += list.length;
+    }
+    return total;
   }
 }

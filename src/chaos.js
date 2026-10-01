@@ -77,7 +77,11 @@ export class ChaosEngine {
     // 3. Synthetic Latency & Jitter Delay
     const delayMs = this.computeDelayMs();
     if (delayMs > 0) {
-      await Bun.sleep(delayMs);
+      if (typeof Bun !== 'undefined' && typeof Bun.sleep === 'function') {
+        await Bun.sleep(delayMs);
+      } else {
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
     }
 
     return null;

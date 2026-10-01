@@ -13,7 +13,8 @@ export function createStorageMatch({
   signal = 'HIT',
   isOfflineMiss = false,
   errorMessage = null,
-  maxAge = null
+  maxAge = null,
+  staleWhileRevalidate = null
 }) {
   return {
     statusCode,
@@ -26,15 +27,16 @@ export function createStorageMatch({
     signal,
     isOfflineMiss: Boolean(isOfflineMiss),
     errorMessage,
-    maxAge
+    maxAge,
+    staleWhileRevalidate
   };
 }
 
 export class FileCacheAdapter {
-  constructor({ cacheDir = '.boombox-cache', matchBody = false } = {}) {
+  constructor({ cacheDir = '.boombox-cache', matchBody = false, maxSizeBytes = null } = {}) {
     this.cacheDir = cacheDir;
     this.matchBody = Boolean(matchBody);
-    this.cacheManager = new CacheManager(cacheDir);
+    this.cacheManager = new CacheManager(cacheDir, { maxSizeBytes });
   }
 
   isCacheable(method) {
@@ -57,6 +59,7 @@ export class FileCacheAdapter {
       etag: entry.etag,
       lastModified: entry.lastModified,
       maxAge: entry.maxAge,
+      staleWhileRevalidate: entry.staleWhileRevalidate,
       signal: 'HIT'
     });
   }
@@ -75,6 +78,10 @@ export class FileCacheAdapter {
 
   isFresh(match) {
     return this.cacheManager.isFresh(match);
+  }
+
+  isStaleWhileRevalidate(match) {
+    return this.cacheManager.isStaleWhileRevalidate(match);
   }
 
   touch({ method, path, headers, bodyText = null }) {

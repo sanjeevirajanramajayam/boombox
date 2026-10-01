@@ -1,0 +1,13 @@
+# Boombox - Cloudflare Workers Edge Caching Proxy & Chaos Simulator
+name = "boombox"
+main = "src/worker.js"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+ORIGIN = "https://dummyjson.com"
+# Optional Chaos Fault Injection variables:
+# CHAOS_LATENCY = "150"
+# CHAOS_FLAKE_RATE = "5"
+# CHAOS_JITTER = "50-200"
+# CHAOS_OVERRIDE = ["/checkout:429"]
