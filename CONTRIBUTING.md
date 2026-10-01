@@ -27,12 +27,7 @@ When authoring code or proposing features:
 1. **RFC 9111 Compliance**: Caching behavior must adhere strictly to [RFC 9111](https://www.rfc-editor.org/rfc/rfc9111.html). Never cache mutating verbs (`POST`, `PUT`, `DELETE`).
 2. **Hop-by-Hop Sanitization**: Never forward or cache connection-specific headers per RFC 9110 §7.6.1 (`transfer-encoding`, `connection`, `keep-alive`, etc.).
 3. **VCR Zero-Network Invariant**: In `--mode replay`, code must NEVER initiate outbound network connections. Unrecorded tracks must fail fast with `502 Bad Gateway`.
-4. **First-Principles Code Annotations**: Every logical block and function must include standardized comment blocks:
-   ```javascript
-   // [WHY]: Physical constraint, standard (RFC section), or failure mode prevented.
-   // [HOW]: State transition, serialization, or algorithmic flow.
-   // [INVARIANTS/WHEN]: Guarantees that must hold true before and after execution.
-   ```
+4. **Code Quality & Tests**: Write readable, idiomatic JavaScript with accompanying `bun test` coverage for any new behavioral paths.
 
 ---
 
