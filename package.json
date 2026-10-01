@@ -1,17 +1,53 @@
 {
-  "name": "boombox",
+  "name": "boombox-http",
   "version": "1.0.0",
-  "description": "A CLI caching proxy, VCR record/replay engine, and chaos simulator",
+  "description": "Deterministic CLI caching proxy, VCR record/replay engine, and chaos simulator",
   "main": "src/server.js",
   "bin": {
     "boombox": "./bin/boombox.js"
   },
+  "exports": {
+    ".": "./src/server.js",
+    "./cache": "./src/cache.js",
+    "./vcr": "./src/vcr.js",
+    "./chaos": "./src/chaos.js",
+    "./dashboard": "./src/dashboard.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
   "type": "module",
   "scripts": {
     "start": "bun bin/boombox.js",
     "test": "bun test"
   },
-  "keywords": ["boombox", "caching", "proxy", "vcr", "chaos", "cli"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sanjeevirajanramajayam/boombox.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sanjeevirajanramajayam/boombox/issues"
+  },
+  "homepage": "https://github.com/sanjeevirajanramajayam/boombox#readme",
+  "engines": {
+    "bun": ">=1.0.0",
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "boombox",
+    "caching",
+    "proxy",
+    "vcr",
+    "chaos",
+    "cli",
+    "service-virtualization",
+    "rfc9111",
+    "mocking",
+    "offline-testing"
+  ],
   "author": "Sanjeevi Rajan Ramajayam",
   "license": "MIT"
 }
