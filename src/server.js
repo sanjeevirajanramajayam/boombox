@@ -152,7 +152,7 @@ export function createProxyServer({
           const fetchOptions = {
             method,
             headers: forwardHeaders,
-            redirect: 'manual'
+            redirect: 'follow'
           };
 
           if (requestBodyText) {
@@ -289,7 +289,7 @@ export function createProxyServer({
         const fetchOptions = {
           method,
           headers: forwardHeaders,
-          redirect: 'manual'
+          redirect: 'follow'
         };
 
         if (requestBodyText) {
