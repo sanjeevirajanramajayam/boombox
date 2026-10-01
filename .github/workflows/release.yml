@@ -1,0 +1,48 @@
+name: Release Binaries
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Compile Standalone Binaries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Verify Tests
+        run: bun test
+
+      - name: Compile Standalone Executables
+        run: |
+          mkdir -p dist
+          bun build --compile --target=bun-windows-x64 ./bin/boombox.js --outfile dist/boombox-windows-x64.exe
+          bun build --compile --target=bun-linux-x64 ./bin/boombox.js --outfile dist/boombox-linux-x64
+          bun build --compile --target=bun-linux-arm64 ./bin/boombox.js --outfile dist/boombox-linux-arm64
+          bun build --compile --target=bun-darwin-x64 ./bin/boombox.js --outfile dist/boombox-darwin-x64
+          bun build --compile --target=bun-darwin-arm64 ./bin/boombox.js --outfile dist/boombox-darwin-arm64
+          ls -lh dist/
+
+      - name: Upload Binaries to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/boombox-windows-x64.exe
+            dist/boombox-linux-x64
+            dist/boombox-linux-arm64
+            dist/boombox-darwin-x64
+            dist/boombox-darwin-arm64
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

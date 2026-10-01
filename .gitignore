@@ -4,6 +4,8 @@ node_modules/
 .test-cassettes/
 cassettes/
 *.log
+dist/
+*.exe
 
 # Internal & Personal Documentation
 AUDIT_LOG.md
