@@ -1,8 +1,3 @@
-// [WHY]: Test suite validates observable HTTP behaviors of Boombox proxy per RFC 9111.
-//        Tests hit real loopback TCP sockets using Bun.serve without internal mock assumptions.
-// [HOW]: Creates a mock origin server and a Boombox proxy server on ephemeral ports.
-//        Asserts X-Cache telemetry (MISS vs HIT vs BYPASS), payload fidelity, and cache invalidation.
-// [INVARIANTS/WHEN]: Servers are cleanly torn down after all test assertions complete.
 
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { createProxyServer } from '../src/server.js';

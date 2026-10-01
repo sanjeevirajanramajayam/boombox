@@ -1,0 +1,3 @@
+# Automatically strip local first-principles annotations before committing to git
+*.js filter=strip-annotations
+*.ts filter=strip-annotations

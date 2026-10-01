@@ -1,8 +1,3 @@
-// [WHY]: Validates VCR Service Virtualization per Boombox specification and Martin Fowler's
-//        deterministic testing principles. Tests verify 100% offline isolation by killing origin servers.
-// [HOW]: Creates a live mock origin server, records interactions into a cassette file, kills the origin,
-//        and validates that offline replay serves byte-identical responses over real loopback sockets.
-// [INVARIANTS/WHEN]: In replay mode, requests must succeed even when the origin server is unreachable or dead.
 
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { createProxyServer } from '../src/server.js';

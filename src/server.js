@@ -1,17 +1,7 @@
-// [WHY]: RFC 9111 specifies caching proxy requirements for intermediaries forwarding HTTP traffic.
-//        Intermediaries must preserve payload fidelity, strip connection-specific hop-by-hop headers (RFC 9110 §7.6.1),
-//        and signal cache telemetry via X-Cache headers (HIT, MISS, REPLAY, RECORD, BYPASS).
-// [HOW]: Uses Bun.serve to create a high-throughput HTTP proxy loop.
-//        Supports two storage engines:
-//        1. Core Cache Engine (CacheManager): Global key-value cache with RFC 9111 method filtering.
-//        2. VCR Engine (CassetteManager): Named tape recording and 100% offline replay.
-// [INVARIANTS/WHEN]: In VCR 'replay' mode, outbound network calls are strictly prohibited; unrecorded routes fail fast with 502.
 
 import { CacheManager } from './cache.js';
 import { CassetteManager } from './vcr.js';
 
-// [WHY]: RFC 9110 Section 7.6.1 mandates hop-by-hop headers apply only to a single transport link
-//        and must not be forwarded by proxies to prevent socket desynchronization.
 const HOP_BY_HOP_HEADERS = new Set([
   'connection',
   'keep-alive',
@@ -41,9 +31,6 @@ export function createProxyServer({
   cassetteDir = 'cassettes',
   mode = 'auto'
 } = {}) {
-  // [WHY]: Replay mode must function 100% offline without requiring an active origin URL.
-  // [HOW]: Allows missing origin only when explicitly running in replay mode.
-  // [INVARIANTS/WHEN]: In record or auto mode, origin is strictly required.
   if (!origin && mode !== 'replay') {
     throw new Error('Proxy requires an upstream origin URL (e.g. --origin http://example.com)');
   }
@@ -63,9 +50,6 @@ export function createProxyServer({
       // PIPELINE BRANCH 1: VCR Service Virtualization
       // ==========================================
       if (vcr) {
-        // [WHY]: Replay and auto modes check local tape before touching external networks.
-        // [HOW]: Performs deterministic lookup against the active cassette JSON.
-        // [INVARIANTS/WHEN]: Returns recorded status and payload; attaches X-Cache: REPLAY.
         if (mode === 'replay' || mode === 'auto') {
           const matched = vcr.match(method, targetPath);
           if (matched) {
@@ -77,9 +61,6 @@ export function createProxyServer({
             });
           }
 
-          // [WHY]: In replay mode, missing entries must fail fast with informative telemetry rather than hanging.
-          // [HOW]: Returns RFC-compliant 502 Bad Gateway with diagnostic JSON payload.
-          // [INVARIANTS/WHEN]: Zero outbound network requests are initiated in replay mode.
           if (mode === 'replay') {
             return Response.json({
               error: 'Cassette interaction not found in replay mode',
@@ -93,9 +74,6 @@ export function createProxyServer({
           }
         }
 
-        // [WHY]: In 'record' or 'auto' (on miss), forward to live origin and record tape track.
-        // [HOW]: Executes origin fetch, stores interaction into cassette, returns response with X-Cache: RECORD.
-        // [INVARIANTS/WHEN]: Requires valid origin URL.
         try {
           const forwardHeaders = new Headers();
           for (const [key, value] of req.headers.entries()) {

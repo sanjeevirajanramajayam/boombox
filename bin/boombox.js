@@ -1,9 +1,5 @@
 #!/usr/bin/env bun
 
-// [WHY]: Provides a user-friendly CLI binary according to Boombox specification.
-//        Supports core caching and VCR record/replay flags (--cassette, --mode).
-// [HOW]: Parses process.argv arguments, validates port, origin, and VCR modes, launching the proxy server.
-// [INVARIANTS/WHEN]: In --mode replay, --origin is optional. In record or auto, --origin is required.
 
 import { createProxyServer } from '../src/server.js';
 import { CacheManager } from '../src/cache.js';
