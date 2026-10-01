@@ -2,11 +2,13 @@ node_modules/
 .boombox-cache/
 .test-boombox-cache/
 .test-cassettes/
+cassettes/
 *.log
 
-# Learning materials & personal notes
-lessons/
-learning-records/
+# Internal & Personal Documentation
+AUDIT_LOG.md
 NOTES.md
+learning-records/
+lessons/
 assets/
 reference/
