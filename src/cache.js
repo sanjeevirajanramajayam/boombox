@@ -54,7 +54,7 @@ export class CacheManager {
     return ageSeconds < entry.maxAge;
   }
 
-  get(method, rawUrl, requestBody = null) {
+  get(method, rawUrl, requestBody = null, requestHeaders = null) {
     const key = this.computeKey(method, rawUrl, requestBody);
     const filePath = join(this.cacheDir, `${key}.json`);
 
@@ -64,13 +64,31 @@ export class CacheManager {
 
     try {
       const content = readFileSync(filePath, 'utf8');
-      return JSON.parse(content);
+      const data = JSON.parse(content);
+
+      // If representation contains variants from Vary negotiation
+      if (Array.isArray(data.variants) && Array.isArray(data.vary)) {
+        if (!requestHeaders) return null;
+
+        const matched = data.variants.find(v => {
+          return data.vary.every(headerName => {
+            const incoming = requestHeaders instanceof Headers
+              ? requestHeaders.get(headerName)
+              : (requestHeaders[headerName] || requestHeaders[headerName.toLowerCase()] || null);
+            return (v.varyMap?.[headerName] || null) === (incoming || null);
+          });
+        });
+
+        return matched || null;
+      }
+
+      return data;
     } catch {
       return null;
     }
   }
 
-  set(method, rawUrl, { statusCode, headers, body, isBase64 = false }, requestBody = null) {
+  set(method, rawUrl, { statusCode, headers, body, isBase64 = false }, requestBody = null, requestHeaders = null) {
     const key = this.computeKey(method, rawUrl, requestBody);
     const filePath = join(this.cacheDir, `${key}.json`);
 
@@ -78,10 +96,9 @@ export class CacheManager {
     const cacheControl = headersMap['cache-control'] || headersMap['Cache-Control'];
     const etag = headersMap['etag'] || headersMap['ETag'] || null;
     const lastModified = headersMap['last-modified'] || headersMap['Last-Modified'] || null;
+    const varyHeader = headersMap['vary'] || headersMap['Vary'] || null;
 
-    const entry = {
-      method: method.toUpperCase(),
-      url: rawUrl,
+    const singleData = {
       statusCode,
       headers: headersMap,
       body,
@@ -92,18 +109,82 @@ export class CacheManager {
       cachedAt: new Date().toISOString()
     };
 
-    writeFileSync(filePath, JSON.stringify(entry, null, 2), 'utf8');
-  }
+    if (varyHeader && typeof varyHeader === 'string') {
+      const varyNames = varyHeader.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+      const requestVaryMap = {};
 
+      if (requestHeaders) {
+        for (const name of varyNames) {
+          const val = requestHeaders instanceof Headers
+            ? requestHeaders.get(name)
+            : (requestHeaders[name] || requestHeaders[name.toLowerCase()] || null);
+          requestVaryMap[name] = val || null;
+        }
+      }
 
-  touch(method, rawUrl, requestBody = null) {
-    const key = this.computeKey(method, rawUrl, requestBody);
-    const filePath = join(this.cacheDir, `${key}.json`);
-    const entry = this.get(method, rawUrl, requestBody);
-    if (entry) {
-      entry.cachedAt = new Date().toISOString();
+      let existing = null;
+      if (existsSync(filePath)) {
+        try {
+          existing = JSON.parse(readFileSync(filePath, 'utf8'));
+        } catch {}
+      }
+
+      const existingVariants = Array.isArray(existing?.variants) ? existing.variants : [];
+      // Remove prior variant with identical varyMap
+      const filteredVariants = existingVariants.filter(v => {
+        return !varyNames.every(name => v.varyMap?.[name] === requestVaryMap[name]);
+      });
+
+      filteredVariants.push({
+        ...singleData,
+        varyMap: requestVaryMap
+      });
+
+      const parentEntry = {
+        method: method.toUpperCase(),
+        url: rawUrl,
+        vary: varyNames,
+        variants: filteredVariants
+      };
+
+      writeFileSync(filePath, JSON.stringify(parentEntry, null, 2), 'utf8');
+    } else {
+      const entry = {
+        ...singleData,
+        method: method.toUpperCase(),
+        url: rawUrl
+      };
       writeFileSync(filePath, JSON.stringify(entry, null, 2), 'utf8');
     }
+  }
+
+  touch(method, rawUrl, requestBody = null, requestHeaders = null) {
+    const key = this.computeKey(method, rawUrl, requestBody);
+    const filePath = join(this.cacheDir, `${key}.json`);
+
+    if (!existsSync(filePath)) return;
+
+    try {
+      const data = JSON.parse(readFileSync(filePath, 'utf8'));
+      if (Array.isArray(data.variants) && Array.isArray(data.vary) && requestHeaders) {
+        const variant = data.variants.find(v => {
+          return data.vary.every(headerName => {
+            const incoming = requestHeaders instanceof Headers
+              ? requestHeaders.get(headerName)
+              : (requestHeaders[headerName] || requestHeaders[headerName.toLowerCase()] || null);
+            return (v.varyMap?.[headerName] || null) === (incoming || null);
+          });
+        });
+
+        if (variant) {
+          variant.cachedAt = new Date().toISOString();
+          writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+        }
+      } else {
+        data.cachedAt = new Date().toISOString();
+        writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+      }
+    } catch {}
   }
 
   clear() {

@@ -218,7 +218,7 @@ export function createProxyServer({
       const isCacheable = method === 'GET' || method === 'HEAD' || (matchBody && method === 'POST');
 
       if (isCacheable) {
-        const cached = cache.get(method, targetPath, requestBodyText);
+        const cached = cache.get(method, targetPath, requestBodyText, req.headers);
         if (cached) {
           const cachedBody = cached.isBase64 ? Buffer.from(cached.body, 'base64') : cached.body;
 
@@ -253,7 +253,7 @@ export function createProxyServer({
               });
 
               if (revalRes.status === 304) {
-                cache.touch(method, targetPath, requestBodyText);
+                cache.touch(method, targetPath, requestBodyText, req.headers);
                 const revalHeaders = new Headers(filterHeaders(cached.headers));
                 revalHeaders.set('X-Cache', 'REVALIDATED');
 
@@ -317,7 +317,7 @@ export function createProxyServer({
             headers: outHeaders,
             body: serializedBody,
             isBase64: isBinary
-          }, requestBodyText);
+          }, requestBodyText, req.headers);
         }
 
         const clientHeaders = new Headers(outHeaders);

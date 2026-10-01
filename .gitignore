@@ -2,6 +2,7 @@ node_modules/
 .boombox-cache/
 .test-boombox-cache/
 .test-cassettes/
+.bun-cache/
 cassettes/
 *.log
 dist/
