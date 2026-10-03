@@ -20,10 +20,14 @@ export class ProxyPipeline {
     this.cassette = Boolean(cassette);
   }
 
+  setOrigin(newOrigin) {
+    this.origin = newOrigin ? newOrigin.replace(/\/+$/, '') : null;
+    this.transport = this.origin ? new OriginTransport({ origin: this.origin, redirect: 'follow' }) : null;
+  }
+
   async dispatch(req, ctx = {}) {
     const startTime = performance.now();
     const url = new URL(req.url);
-    const targetPath = url.pathname + url.search;
     const method = req.method.toUpperCase();
 
     let requestBodyText = null;
@@ -34,9 +38,58 @@ export class ProxyPipeline {
     }
 
     // ==========================================
+    // ADMIN CONTROL PLANE: Dynamic Origin Management
+    // ==========================================
+    if (url.pathname === '/_boombox/origin') {
+      if (method === 'POST') {
+        try {
+          const bodyJson = JSON.parse(requestBodyText || '{}');
+          if (bodyJson.origin) {
+            this.setOrigin(bodyJson.origin);
+            return Response.json({ success: true, origin: this.origin });
+          }
+          return Response.json({ error: 'MISSING_ORIGIN', message: 'Field "origin" is required.' }, { status: 400 });
+        } catch (err) {
+          return Response.json({ error: 'INVALID_JSON', message: err.message }, { status: 400 });
+        }
+      }
+      if (method === 'GET') {
+        return Response.json({ origin: this.origin });
+      }
+    }
+
+    // ==========================================
+    // DYNAMIC TARGET & MULTI-ORIGIN EXTRACTION
+    // ==========================================
+    const rawPath = url.pathname + url.search;
+    const customOriginHeader = req.headers.get('x-boombox-origin') || req.headers.get('x-target-origin');
+
+    let activeOrigin = this.origin;
+    let targetPath = rawPath;
+    let storageKeyPath = rawPath;
+
+    // Pattern 1: Transparent Full-URL Proxying (e.g. /https://api.stripe.com/v1/charges or /http://...)
+    const trimmedPath = url.pathname.replace(/^\/+/, '');
+    if (trimmedPath.startsWith('http://') || trimmedPath.startsWith('https://')) {
+      try {
+        const fullUrl = new URL(trimmedPath + url.search);
+        activeOrigin = fullUrl.origin;
+        targetPath = fullUrl.pathname + fullUrl.search;
+        storageKeyPath = fullUrl.toString(); // Full URL prevents cross-origin cache collision!
+      } catch {}
+    } else if (customOriginHeader) {
+      activeOrigin = customOriginHeader.replace(/\/+$/, '');
+      storageKeyPath = `${activeOrigin}${rawPath}`;
+    }
+
+    const activeTransport = (activeOrigin && activeOrigin !== this.origin)
+      ? new OriginTransport({ origin: activeOrigin, redirect: 'follow' })
+      : this.transport;
+
+    // ==========================================
     // STAGE 1: Chaos Simulation Middleware
     // ==========================================
-    const chaosResponse = await this.chaos.evaluate(url.pathname);
+    const chaosResponse = await this.chaos.evaluate(targetPath);
     if (chaosResponse) {
       this.telemetry.record({
         method,
@@ -53,7 +106,7 @@ export class ProxyPipeline {
     // ==========================================
     const cached = await this.storage.lookup({
       method,
-      path: targetPath,
+      path: storageKeyPath,
       headers: req.headers,
       bodyText: requestBodyText,
       request: req
@@ -115,8 +168,8 @@ export class ProxyPipeline {
           durationMs: performance.now() - startTime
         });
 
-        if (this.transport) {
-          const revalPromise = this.transport.forward({
+        if (activeTransport) {
+          const revalPromise = activeTransport.forward({
             method,
             path: targetPath,
             headers: req.headers,
@@ -124,7 +177,7 @@ export class ProxyPipeline {
           }).then(upstream => {
             return this.storage.store({
               method,
-              path: targetPath,
+              path: storageKeyPath,
               headers: req.headers,
               bodyText: requestBodyText,
               response: upstream,
@@ -144,13 +197,13 @@ export class ProxyPipeline {
       }
 
       // 3. Conditional 304 Revalidation (ETag / If-Modified-Since)
-      if (this.origin && this.transport && (cached.etag || cached.lastModified)) {
+      if (activeOrigin && activeTransport && (cached.etag || cached.lastModified)) {
         try {
           const condHeaders = new Headers();
           if (cached.etag) condHeaders.set('If-None-Match', cached.etag);
           if (cached.lastModified) condHeaders.set('If-Modified-Since', cached.lastModified);
 
-          const upstream = await this.transport.forward({
+          const upstream = await activeTransport.forward({
             method,
             path: targetPath,
             headers: condHeaders,
@@ -160,7 +213,7 @@ export class ProxyPipeline {
           if (upstream.statusCode === 304) {
             this.storage.touch({
               method,
-              path: targetPath,
+              path: storageKeyPath,
               headers: req.headers,
               bodyText: requestBodyText
             });
@@ -190,15 +243,15 @@ export class ProxyPipeline {
     // ==========================================
     // STAGE 3: Upstream Forward & Store
     // ==========================================
-    if (!this.transport) {
+    if (!activeTransport) {
       return Response.json({
         error: 'ORIGIN_NOT_CONFIGURED',
-        message: 'No upstream origin configured to satisfy cache miss.'
+        message: 'No upstream origin configured to satisfy request. Use --origin, X-Boombox-Origin header, or transparent URL (/https://domain/path).'
       }, { status: 500 });
     }
 
     try {
-      const upstream = await this.transport.forward({
+      const upstream = await activeTransport.forward({
         method,
         path: targetPath,
         headers: req.headers,
@@ -207,7 +260,7 @@ export class ProxyPipeline {
 
       const storePromise = this.storage.store({
         method,
-        path: targetPath,
+        path: storageKeyPath,
         headers: req.headers,
         bodyText: requestBodyText,
         response: upstream,
