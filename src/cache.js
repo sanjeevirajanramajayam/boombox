@@ -2,6 +2,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync, statSync, unlinkSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
+import { normalizeUrl, normalizeBody } from './normalize.js';
 
 export function createStorageMatch({
   statusCode,
@@ -96,22 +97,11 @@ export class DiskCacheAdapter {
   }
 
   normalizeUrl(rawUrl) {
-    const parsed = new URL(rawUrl, 'http://localhost');
-    parsed.searchParams.sort();
-    return parsed.pathname + (parsed.searchParams.toString() ? '?' + parsed.searchParams.toString() : '');
+    return normalizeUrl(rawUrl);
   }
 
   normalizeBody(body) {
-    if (!body) return '';
-    if (typeof body === 'string') {
-      try {
-        const obj = JSON.parse(body);
-        return JSON.stringify(obj, Object.keys(obj).sort());
-      } catch {
-        return body.trim();
-      }
-    }
-    return String(body);
+    return normalizeBody(body);
   }
 
   computeKey(method, rawUrl, requestBody = null) {
