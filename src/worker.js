@@ -1,7 +1,7 @@
 
 import { ChaosEngine } from './chaos.js';
 import { ProxyPipeline } from './pipeline.js';
-import { createStorageMatch } from './cache.js';
+import { createStorageMatch } from './match.js';
 
 export class InMemoryEdgeCache {
   constructor() {

@@ -1,4 +1,6 @@
 
+import { Buffer } from 'node:buffer';                                                          // Explicit Buffer import for Cloudflare Workers nodejs_compat
+
 // Set containing all 8 connection-specific hop-by-hop headers defined in RFC 9110 §7.6.1
 export const HOP_BY_HOP_HEADERS = new Set([
   'connection',          // Controls hop connection options (close/keep-alive)

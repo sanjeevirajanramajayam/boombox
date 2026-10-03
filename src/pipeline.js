@@ -2,6 +2,7 @@
 import { ChaosEngine } from './chaos.js';
 import { MetricsCollector } from './metrics.js';
 import { OriginTransport, filterHeaders } from './transport.js';
+import { Buffer } from 'node:buffer';
 
 export class ProxyPipeline {
   constructor({
