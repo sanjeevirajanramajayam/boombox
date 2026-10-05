@@ -90,3 +90,27 @@ Developers building applications and automated test suites face three recurring 
 
 - The specification provides complete backward compatibility with all original roadmap requirements (`boombox --port <number> --origin <url>` and `boombox --clear-cache`).
 - All advanced capabilities (VCR cassette modes and chaos simulations) are completely opt-in via optional flags, ensuring zero performance overhead during basic proxy usage.
+
+---
+
+## Implemented Extensions & Production Architecture (v1.0+)
+
+### 1. Multi-Origin Emulation & Dynamic Routing
+- Supports transparent full-URL paths (`/https://api.stripe.com/v1/charges`), dynamic per-request origin headers (`X-Boombox-Origin`), and runtime admin control plane updates (`POST /_boombox/origin`).
+- Partitioned storage keys prevent cross-origin cache collisions by binding full target URIs into the primary cache key.
+
+### 2. Cloudflare Workers Global Edge Deployment
+- Edge-native isolate runtime (`src/worker.js`) running globally on Cloudflare Workers across 330+ Anycast PoPs (`https://boombox.sanjeevirajanramajayam.workers.dev`).
+- Uses Web Standard `Request`, `Response`, and `caches.default` edge cache integration.
+
+### 3. Advanced RFC 9111 & RFC 5861 Protocols
+- **Freshness Evaluation**: Strict computation of freshness lifetimes via `Cache-Control: max-age`.
+- **Stale-While-Revalidate (SWR)**: RFC 5861 asynchronous background revalidation delivering stale content immediately with `X-Cache: STALE`.
+- **Conditional 304 Validation**: Revalidation using `If-None-Match` (`ETag`) and `If-Modified-Since` without re-downloading response bodies.
+- **Vary Header Content Negotiation**: RFC 9111 §4.1 multi-variant caching partitioned by client request headers.
+
+### 4. Enterprise Hardening & Media Support
+- **Binary Media Preservation**: MIME sniffing and Base64 roundtrip serialization for images, audio, video, and documents.
+- **OWASP Secret Redaction**: Automatic masking of sensitive headers (`Authorization`, `Set-Cookie`, `Cookie`) in cassettes.
+- **Sequential Playback**: Stateful cursor-based polling endpoint simulation sticking to terminal states.
+- **LRU Eviction**: Bounded disk quota with automatic eviction down to an 80% watermark.
