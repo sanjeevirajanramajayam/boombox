@@ -24,7 +24,9 @@
     "start": "bun bin/boombox.js",
     "test": "bun test",
     "demo:cli": "bun prototypes/cli-scenarios-demo.js",
-    "demo:react": "cd examples/react-app && bun dev"
+    "demo:backend": "bun examples/store-backend/server.js",
+    "demo:proxy": "bun bin/boombox.js --port 3000 --origin http://localhost:4000",
+    "demo:frontend": "cd examples/react-app && bun dev"
   },
   "repository": {
     "type": "git",

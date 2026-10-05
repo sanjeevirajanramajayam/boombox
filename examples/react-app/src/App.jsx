@@ -1,408 +1,279 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
-// [WHY]: Provide a real-world React demo showing how frontend engineering teams consume Boombox.
-// [HOW]: Switches baseURL between Direct Origin and Boombox Edge/Local Proxy; measures roundtrip latency,
-//        inspects X-Cache headers, injects chaos headers on demand, and tests multi-origin proxying.
-// [INVARIANTS/WHEN]: Safe fallback to mock responses if local proxy is offline during client-side testing.
+// [WHY]: Real-world React 19 storefront demonstrating how modern web applications integrate with Boombox.
+// [HOW]: Queries Boombox proxy (:3000) which forwards to Store Backend (:4000). Visualizes shimmer loading
+//        skeletons during chaos delay, displays live X-Cache HIT/MISS badges, and handles simulated 503 payment failures.
+// [INVARIANTS/WHEN]: Survives physical backend termination (:4000) by continuing to render cached products from proxy (:3000).
+
+const PROXY_BASE_URL = 'http://localhost:3000';
 
 export default function App() {
-  const [gatewayMode, setGatewayMode] = useState('edge'); // 'edge' | 'local' | 'direct'
-  const [logs, setLogs] = useState([
-    `[${new Date().toLocaleTimeString()}] System ready. Select gateway and run scenarios.`
-  ]);
-
-  // Scenario 1: Cache Speedup
-  const [s1State, setS1State] = useState({ latency: null, signal: null, count: 0, data: null, speedup: null, firstLatency: null });
-  const [s1Loading, setS1Loading] = useState(false);
-
-  // Scenario 2: CI / VCR
-  const [s2State, setS2State] = useState({ status: null, signal: null, offline: false, order: null });
-
-  // Scenario 3: QA Chaos
-  const [s3Delay, setS3Delay] = useState(1500);
-  const [s3Override, setS3Override] = useState(false);
-  const [s3State, setS3State] = useState({ status: null, latency: null, error: null });
-  const [s3Loading, setS3Loading] = useState(false);
-
-  // Scenario 4: Multi-Origin
-  const [s4Zen, setS4Zen] = useState(null);
-  const [s4Product, setS4Product] = useState(null);
-
-  // Compute Active Base URL
-  const getBaseUrl = () => {
-    if (gatewayMode === 'edge') return 'https://boombox.sanjeevirajanramajayam.workers.dev';
-    if (gatewayMode === 'local') return 'http://localhost:3000';
-    return 'https://dummyjson.com';
-  };
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [cart, setCart] = useState([]);
+  const [paymentStatus, setPaymentStatus] = useState(null); // null | 'processing' | 'succeeded' | 'failed'
+  const [paymentError, setPaymentError] = useState(null);
+  const [telemetry, setTelemetry] = useState({
+    latencyMs: null,
+    cacheSignal: null,
+    source: null,
+    statusCode: null
+  });
+  const [networkLogs, setNetworkLogs] = useState([]);
 
   const addLog = (msg) => {
-    setLogs((prev) => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev.slice(0, 15)]);
+    setNetworkLogs((prev) => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev.slice(0, 10)]);
   };
 
-  // --------------------------------------------------------------------------
-  // Scenario 1: Frontend Developer (Cache MISS vs Cache HIT)
-  // --------------------------------------------------------------------------
-  const runScenario1 = async () => {
-    setS1Loading(true);
+  // 1. Fetch Product Catalogue from Boombox Proxy
+  const fetchProducts = async () => {
+    setLoading(true);
+    setPaymentStatus(null);
     const start = performance.now();
-    const baseUrl = getBaseUrl();
-    const targetUrl = `${baseUrl}/products/1`;
+    addLog(`[Client -> Boombox] GET ${PROXY_BASE_URL}/api/products`);
 
     try {
-      addLog(`[Client] GET ${targetUrl}...`);
-      const res = await fetch(targetUrl);
+      const res = await fetch(`${PROXY_BASE_URL}/api/products`);
       const elapsed = Math.round(performance.now() - start);
       const data = await res.json();
-      const signal = res.headers.get('X-Cache') || (gatewayMode === 'direct' ? 'DIRECT (NO CACHE)' : 'HIT');
 
-      let speedup = null;
-      let firstLat = s1State.firstLatency;
-      if (!firstLat && signal === 'MISS') {
-        firstLat = elapsed;
-      } else if (firstLat && signal === 'HIT') {
-        speedup = Math.round(firstLat / Math.max(elapsed, 1));
+      const signal = res.headers.get('X-Cache') || 'DIRECT';
+      const statusCode = res.status;
+
+      setTelemetry({
+        latencyMs: elapsed,
+        cacheSignal: signal,
+        source: data.source || (signal === 'HIT' ? 'BOOMBOX_RAM_CACHE' : 'UNKNOWN'),
+        statusCode
+      });
+
+      if (data.products) {
+        setProducts(data.products);
+        addLog(`[Response] ${statusCode} OK | X-Cache: ${signal} | Latency: ${elapsed}ms | Loaded ${data.products.length} items`);
+      } else if (data.error) {
+        addLog(`[Error Response] ${statusCode} | ${data.message || data.error}`);
       }
-
-      setS1State((prev) => ({
-        latency: elapsed,
-        signal,
-        count: prev.count + 1,
-        data: data.title || 'Product Retrieved',
-        speedup,
-        firstLatency: firstLat
-      }));
-
-      addLog(`[Response] ${res.status} | Signal: ${signal} | Latency: ${elapsed}ms | "${data.title}"`);
     } catch (err) {
-      addLog(`[Error] Request failed: ${err.message}`);
+      const elapsed = Math.round(performance.now() - start);
+      setTelemetry({ latencyMs: elapsed, cacheSignal: 'ERROR', source: 'OFFLINE', statusCode: 502 });
+      addLog(`[Network Error] Failed connecting to proxy: ${err.message}`);
     } finally {
-      setS1Loading(false);
+      setLoading(false);
     }
   };
 
-  // --------------------------------------------------------------------------
-  // Scenario 2: CI / CD Service Virtualization (VCR)
-  // --------------------------------------------------------------------------
-  const runScenario2 = async () => {
-    const baseUrl = getBaseUrl();
-    const targetUrl = s2State.offline ? 'http://localhost:59999/checkout' : `${baseUrl}/carts/1`;
-    addLog(`[CI Runner] Executing checkout test against ${targetUrl}...`);
+  // Load products on initial render
+  useEffect(() => {
+    fetchProducts();
+  }, []);
 
-    try {
-      const res = await fetch(targetUrl);
-      const data = await res.json();
-      setS2State({
-        status: res.status,
-        signal: res.headers.get('X-Cache') || 'REPLAY',
-        offline: s2State.offline,
-        order: `Cart #${data.id || 1} verified (Total: $${data.total || 168})`
-      });
-      addLog(`[CI Assertion] 200 OK | X-Cache: ${res.headers.get('X-Cache') || 'REPLAY'} | Order verified offline!`);
-    } catch (err) {
-      addLog(`[CI Failure] Network unreachable: ${err.message}`);
-    }
+  // 2. Add to Cart Handler
+  const addToCart = (product) => {
+    setCart((prev) => [...prev, product]);
+    addLog(`[Cart] Added "${product.name}" ($${product.price})`);
   };
 
-  // --------------------------------------------------------------------------
-  // Scenario 3: QA & SRE Chaos Simulation
-  // --------------------------------------------------------------------------
-  const runScenario3 = async () => {
-    setS3Loading(true);
+  // 3. Simulate Stripe Checkout Payment
+  const handleStripeCheckout = async () => {
+    setPaymentStatus('processing');
+    setPaymentError(null);
     const start = performance.now();
-    const baseUrl = getBaseUrl();
-    const targetUrl = `${baseUrl}/products/1`;
+    const amount = cart.length > 0 ? Math.round(cart.reduce((acc, p) => acc + p.price, 0) * 100) : 18999;
 
-    const headers = {};
-    if (s3Delay > 0) headers['X-Boombox-Chaos-Delay'] = String(s3Delay);
-    if (s3Override) headers['X-Boombox-Chaos-Override'] = '/products/1:503';
-
-    addLog(`[QA Test] GET ${targetUrl} with Chaos (Delay: ${s3Delay}ms, Override: ${s3Override ? '503' : 'none'})...`);
+    addLog(`[Client -> Boombox] POST ${PROXY_BASE_URL}/api/checkout/pay (Amount: $${(amount / 100).toFixed(2)})`);
 
     try {
-      const res = await fetch(targetUrl, { headers });
+      const res = await fetch(`${PROXY_BASE_URL}/api/checkout/pay`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount, email: 'alex.developer@techcorp.io' })
+      });
+
       const elapsed = Math.round(performance.now() - start);
       const data = await res.json();
+      const signal = res.headers.get('X-Cache') || 'BYPASS';
 
-      setS3State({
-        status: res.status,
-        latency: elapsed,
-        error: res.status >= 400 ? data.message || 'Simulated Service Outage' : null
-      });
-
-      addLog(`[QA Result] Status: ${res.status} | Latency: ${elapsed}ms | Handled gracefully by UI!`);
+      if (res.status === 200 && data.success) {
+        setPaymentStatus('succeeded');
+        addLog(`[Stripe Success] PaymentIntent ${data.paymentIntent.id} verified in ${elapsed}ms! (X-Cache: ${signal})`);
+      } else {
+        setPaymentStatus('failed');
+        const errMsg = data.message || `HTTP ${res.status}: Payment Gateway Failure`;
+        setPaymentError(errMsg);
+        addLog(`[Stripe Error] ${res.status} | ${errMsg}`);
+      }
     } catch (err) {
-      addLog(`[QA Intercept] Error caught: ${err.message}`);
-    } finally {
-      setS3Loading(false);
+      const elapsed = Math.round(performance.now() - start);
+      setPaymentStatus('failed');
+      setPaymentError(`Network Dropped (${elapsed}ms): ${err.message}`);
+      addLog(`[Network Drop] Checkout aborted: ${err.message}`);
     }
   };
 
-  // --------------------------------------------------------------------------
-  // Scenario 4: Microservices Transparent Full-URL Proxying
-  // --------------------------------------------------------------------------
-  const runScenario4 = async () => {
-    const baseUrl = getBaseUrl();
-    addLog(`[Multi-Origin] Querying GitHub Zen and DummyJSON via single proxy...`);
-
-    try {
-      // Query 1: GitHub Zen via transparent full-URL
-      const zenUrl = `${baseUrl}/https://api.github.com/zen`;
-      const zenRes = await fetch(zenUrl);
-      const zenText = await zenRes.text();
-      setS4Zen(zenText.trim());
-      addLog(`[Origin 1] GitHub Zen -> "${zenText.trim()}" (X-Cache: ${zenRes.headers.get('X-Cache') || 'HIT'})`);
-
-      // Query 2: DummyJSON Product via transparent full-URL
-      const prodUrl = `${baseUrl}/https://dummyjson.com/products/2`;
-      const prodRes = await fetch(prodUrl);
-      const prodData = await prodRes.json();
-      setS4Product(prodData.title);
-      addLog(`[Origin 2] DummyJSON -> "${prodData.title}" (X-Cache: ${prodRes.headers.get('X-Cache') || 'HIT'})`);
-    } catch (err) {
-      addLog(`[Multi-Origin Error] ${err.message}`);
-    }
-  };
+  const cartTotal = cart.reduce((acc, item) => acc + item.price, 0);
 
   return (
-    <div className="app-container">
-      {/* Header Glass */}
-      <div className="header-glass">
-        <div className="brand-row">
-          <div>
-            <div className="brand-logo">
-              <span>📻</span> Boombox React Integration
+    <div className="store-wrapper">
+      {/* Top Navbar */}
+      <header className="store-navbar">
+        <div className="nav-container">
+          <div className="brand">
+            <span className="brand-icon">⚡</span>
+            <span className="brand-name">ApexTech Store</span>
+            <span className="live-demo-badge">LIVE DEMO</span>
+          </div>
+
+          {/* Live Telemetry Pill */}
+          <div className="telemetry-pill">
+            <div className="telemetry-item">
+              <span className="label">PROXY GATEWAY:</span>
+              <span className="value">localhost:3000</span>
             </div>
-            <div className="brand-tagline">
-              Real-world React client showcasing Caching, VCR Replay, Chaos Engineering, and Edge Proxying.
-            </div>
-          </div>
-
-          {/* Connection Target Switcher */}
-          <div className="connection-pill-box">
-            <button
-              className={`conn-btn ${gatewayMode === 'edge' ? 'active' : ''}`}
-              onClick={() => { setGatewayMode('edge'); addLog('Switched API Gateway to Live Cloudflare Edge Worker.'); }}
-            >
-              🌐 Edge Worker
-            </button>
-            <button
-              className={`conn-btn ${gatewayMode === 'local' ? 'active' : ''}`}
-              onClick={() => { setGatewayMode('local'); addLog('Switched API Gateway to Local Boombox (:3000).'); }}
-            >
-              💻 Local Proxy
-            </button>
-            <button
-              className={`conn-btn ${gatewayMode === 'direct' ? 'active' : ''}`}
-              onClick={() => { setGatewayMode('direct'); addLog('Switched API Gateway directly to Origin (No Cache).'); }}
-            >
-              ⚠️ Direct Origin
-            </button>
-          </div>
-        </div>
-
-        <div className="url-bar">
-          <span className="url-label">TARGET API BASE:</span>
-          <span className="url-value">{getBaseUrl()}</span>
-        </div>
-      </div>
-
-      {/* 4 Scenarios Grid */}
-      <div className="scenario-grid">
-        {/* Scenario 1: Frontend Developer */}
-        <div className="card">
-          <div className="card-header">
-            <span className="card-title">🚀 1. Frontend Caching Speed</span>
-            <span className="scenario-badge" style={{ background: 'rgba(56, 189, 248, 0.2)', color: 'var(--accent)' }}>
-              Frontend Dev
-            </span>
-          </div>
-          <div className="card-desc">
-            First click triggers an origin <strong>MISS</strong> (~150ms). Subsequent clicks return an instant <strong>HIT</strong> from RAM in &lt;1ms.
-          </div>
-
-          <button className="action-btn" onClick={runScenario1} disabled={s1Loading}>
-            {s1Loading ? 'Fetching...' : '⚡ Fetch /products/1'}
-          </button>
-
-          <div className="metric-row">
-            <div className="metric-item">
-              <span className="metric-label">Latency</span>
-              <span className={`metric-val ${s1State.signal === 'HIT' ? 'val-hit' : 'val-miss'}`}>
-                {s1State.latency !== null ? `${s1State.latency} ms` : '-'}
+            <div className="divider"></div>
+            <div className="telemetry-item">
+              <span className="label">LATENCY:</span>
+              <span className={`value ${telemetry.latencyMs !== null && telemetry.latencyMs < 5 ? 'text-green' : 'text-amber'}`}>
+                {telemetry.latencyMs !== null ? `${telemetry.latencyMs} ms` : '-'}
               </span>
             </div>
-            <div className="metric-item">
-              <span className="metric-label">Cache Signal</span>
-              <span className={`metric-val ${s1State.signal === 'HIT' ? 'val-hit' : 'val-miss'}`}>
-                {s1State.signal || '-'}
-              </span>
-            </div>
-            <div className="metric-item">
-              <span className="metric-label">Speedup</span>
-              <span className="metric-val val-hit">
-                {s1State.speedup ? `${s1State.speedup}x Faster` : '-'}
+            <div className="divider"></div>
+            <div className="telemetry-item">
+              <span className="label">X-CACHE:</span>
+              <span className={`badge ${telemetry.cacheSignal === 'HIT' ? 'badge-hit' : (telemetry.cacheSignal === 'MISS' ? 'badge-miss' : 'badge-bypass')}`}>
+                {telemetry.cacheSignal || 'DISCONNECTED'}
               </span>
             </div>
           </div>
-        </div>
 
-        {/* Scenario 2: CI/CD VCR Replay */}
-        <div className="card">
-          <div className="card-header">
-            <span className="card-title">📼 2. Deterministic CI Replay</span>
-            <span className="scenario-badge" style={{ background: 'rgba(16, 185, 129, 0.2)', color: 'var(--emerald)' }}>
-              CI / CD Platform
-            </span>
-          </div>
-          <div className="card-desc">
-            Tests run against recorded cassette tapes. Even if third-party backends go down, your test suite runs in 0ms without flaking.
-          </div>
-
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button className="action-btn" onClick={runScenario2}>
-              ▶ Run Checkout Test
-            </button>
-            <button
-              className="action-btn btn-secondary"
-              onClick={() => {
-                const next = !s2State.offline;
-                setS2State((prev) => ({ ...prev, offline: next }));
-                addLog(next ? '[Simulation] 💥 External Origin Server STOPPED.' : '[Simulation] Origin Restored.');
-              }}
-            >
-              {s2State.offline ? 'Restore Origin' : 'Kill Origin'}
-            </button>
-          </div>
-
-          <div className="metric-row">
-            <div className="metric-item">
-              <span className="metric-label">Origin Status</span>
-              <span className={`metric-val ${s2State.offline ? 'val-chaos' : 'val-hit'}`}>
-                {s2State.offline ? 'OFFLINE' : 'ONLINE'}
-              </span>
-            </div>
-            <div className="metric-item">
-              <span className="metric-label">Execution</span>
-              <span className="metric-val val-hit">{s2State.signal || 'REPLAY'}</span>
-            </div>
-            <div className="metric-item">
-              <span className="metric-label">Verification</span>
-              <span className="metric-val val-hit">{s2State.status === 200 ? 'PASSED' : '-'}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Scenario 3: QA Chaos Simulator */}
-        <div className="card">
-          <div className="card-header">
-            <span className="card-title">🔥 3. Header-Driven Chaos</span>
-            <span className="scenario-badge" style={{ background: 'rgba(244, 63, 94, 0.2)', color: 'var(--rose)' }}>
-              QA & SRE
-            </span>
-          </div>
-          <div className="card-desc">
-            Simulate slow 3G network latency and 503 service outages using HTTP headers without changing backend code.
-          </div>
-
-          <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-            <label style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-              Delay:
-              <input
-                type="number"
-                value={s3Delay}
-                onChange={(e) => setS3Delay(Number(e.target.value))}
-                style={{ width: '70px', marginLeft: '6px', background: '#040711', color: '#fff', border: '1px solid #334155', borderRadius: '4px', padding: '4px' }}
-              /> ms
-            </label>
-
-            <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <input
-                type="checkbox"
-                checked={s3Override}
-                onChange={(e) => setS3Override(e.target.checked)}
-              /> Force 503
-            </label>
-          </div>
-
-          <button className="action-btn" onClick={runScenario3} disabled={s3Loading} style={{ background: 'linear-gradient(135deg, #e11d48, #9f1239)' }}>
-            {s3Loading ? 'Simulating Fault...' : 'Simulate Failure'}
-          </button>
-
-          <div className="metric-row">
-            <div className="metric-item">
-              <span className="metric-label">Status</span>
-              <span className={`metric-val ${s3State.status === 503 ? 'val-chaos' : 'val-hit'}`}>
-                {s3State.status || '-'}
-              </span>
-            </div>
-            <div className="metric-item">
-              <span className="metric-label">Latency</span>
-              <span className="metric-val">{s3State.latency ? `${s3State.latency} ms` : '-'}</span>
-            </div>
-            <div className="metric-item">
-              <span className="metric-label">Error Intercepted</span>
-              <span className={`metric-val ${s3State.error ? 'val-chaos' : 'val-hit'}`}>
-                {s3State.error ? 'YES' : 'NO'}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Scenario 4: Multi-Origin Edge Gateway */}
-        <div className="card">
-          <div className="card-header">
-            <span className="card-title">🌐 4. Multi-Origin Routing</span>
-            <span className="scenario-badge" style={{ background: 'rgba(168, 85, 247, 0.2)', color: 'var(--purple)' }}>
-              Microservices
-            </span>
-          </div>
-          <div className="card-desc">
-            Proxy to multiple third-party APIs (DummyJSON & GitHub) through a single endpoint with collision-free cache keys.
-          </div>
-
-          <button className="action-btn" onClick={runScenario4}>
-            Proxy to 2 Disparate APIs
-          </button>
-
-          <div className="metric-row">
-            <div className="metric-item" style={{ gridColumn: 'span 3' }}>
-              <span className="metric-label">GitHub Zen:</span>
-              <span className="metric-val" style={{ color: 'var(--accent)', fontSize: '12px' }}>
-                {s4Zen || 'Click to fetch'}
-              </span>
-            </div>
-          </div>
-          <div className="metric-row">
-            <div className="metric-item" style={{ gridColumn: 'span 3' }}>
-              <span className="metric-label">DummyJSON Product:</span>
-              <span className="metric-val" style={{ color: 'var(--purple)', fontSize: '12px' }}>
-                {s4Product || 'Click to fetch'}
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Live Console Output */}
-      <div className="console-card">
-        <div className="console-header">
-          <span className="console-title">
-            <span>💻</span> Live Telemetry & Network Inspector
-          </span>
-          <button
-            className="btn-secondary"
-            style={{ fontSize: '11px', padding: '4px 10px', borderRadius: '4px', cursor: 'pointer' }}
-            onClick={() => setLogs([`[${new Date().toLocaleTimeString()}] Console cleared.`])}
-          >
-            Clear Console
+          <button className="refresh-btn" onClick={fetchProducts} disabled={loading}>
+            {loading ? 'Refreshing...' : '🔄 Refresh Catalogue'}
           </button>
         </div>
-        <div className="console-body">
-          {logs.map((log, idx) => (
-            <div key={idx} className="console-entry">{log}</div>
-          ))}
+      </header>
+
+      {/* Main Container */}
+      <main className="store-content">
+        {/* Banner Explainer for Video */}
+        <section className="video-banner">
+          <div className="banner-text">
+            <h2>Three-Tier Architecture Demonstration</h2>
+            <p>
+              This React storefront connects to <strong>Boombox Proxy (:3000)</strong> which forwards to the <strong>Store Backend (:4000)</strong>.
+              Kill Terminal 1 (Backend) to prove offline resilience, or restart Boombox with <code>--latency 2500</code> or <code>--override /api/checkout/pay:503</code> to watch live chaos handling!
+            </p>
+          </div>
+        </section>
+
+        {/* Product Catalogue & Cart Layout */}
+        <div className="store-layout">
+          {/* Products Grid */}
+          <section className="products-section">
+            <div className="section-header">
+              <h3>Featured Gear ({products.length} items)</h3>
+              <span className="source-tag">Source: {telemetry.source || 'Pending'}</span>
+            </div>
+
+            {loading ? (
+              <div className="products-grid">
+                {[1, 2, 3, 4].map((i) => (
+                  <div key={i} className="product-skeleton">
+                    <div className="skeleton-img shimmer"></div>
+                    <div className="skeleton-title shimmer"></div>
+                    <div className="skeleton-price shimmer"></div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="products-grid">
+                {products.map((p) => (
+                  <div key={p.id} className="product-card">
+                    <img src={p.image} alt={p.name} className="product-image" />
+                    <div className="product-info">
+                      <span className="product-category">{p.category}</span>
+                      <h4 className="product-name">{p.name}</h4>
+                      <p className="product-desc">{p.description}</p>
+                      <div className="product-footer">
+                        <span className="product-price">${p.price.toFixed(2)}</span>
+                        <button className="add-cart-btn" onClick={() => addToCart(p)}>
+                          Add to Cart
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* Cart & Stripe Payment Drawer */}
+          <aside className="cart-sidebar">
+            <div className="cart-box">
+              <h3>Stripe Checkout Cart</h3>
+              {cart.length === 0 ? (
+                <p className="empty-cart">Your cart is empty. Click "Add to Cart" on any item above.</p>
+              ) : (
+                <div className="cart-list">
+                  {cart.map((item, idx) => (
+                    <div key={idx} className="cart-item">
+                      <span className="item-name">{item.name}</span>
+                      <span className="item-price">${item.price.toFixed(2)}</span>
+                    </div>
+                  ))}
+                  <div className="cart-total-row">
+                    <span>Total Due:</span>
+                    <span className="total-amount">${cartTotal.toFixed(2)}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Payment Status Banners */}
+              {paymentStatus === 'succeeded' && (
+                <div className="alert-box alert-success">
+                  <span className="alert-icon">✅</span>
+                  <div>
+                    <strong>Stripe Payment Succeeded!</strong>
+                    <div className="alert-sub">Order processed through Boombox Proxy.</div>
+                  </div>
+                </div>
+              )}
+
+              {paymentStatus === 'failed' && (
+                <div className="alert-box alert-danger">
+                  <span className="alert-icon">🚨</span>
+                  <div>
+                    <strong>Payment Gateway Failure!</strong>
+                    <div className="alert-sub">{paymentError}</div>
+                  </div>
+                </div>
+              )}
+
+              <button
+                className={`checkout-btn ${paymentStatus === 'processing' ? 'btn-loading' : ''}`}
+                onClick={handleStripeCheckout}
+                disabled={paymentStatus === 'processing'}
+              >
+                {paymentStatus === 'processing' ? 'Communicating with Stripe...' : `Pay with Stripe ($${(cartTotal || 189.99).toFixed(2)})`}
+              </button>
+
+              <button className="clear-cart-btn" onClick={() => { setCart([]); setPaymentStatus(null); }}>
+                Clear Cart
+              </button>
+            </div>
+
+            {/* Live Terminal Telemetry Stream */}
+            <div className="mini-console">
+              <div className="console-title">Live Proxy Telemetry Stream</div>
+              <div className="console-lines">
+                {networkLogs.length === 0 ? (
+                  <div className="console-placeholder">Waiting for requests...</div>
+                ) : (
+                  networkLogs.map((log, i) => <div key={i} className="console-row">{log}</div>)
+                )}
+              </div>
+            </div>
+          </aside>
         </div>
-      </div>
+      </main>
     </div>
   );
 }
