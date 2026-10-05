@@ -55,9 +55,17 @@ Arrange your screen into **3 terminal panes** and **1 browser window**:
    * Press **`Ctrl + C`** to kill the backend server.
    * Terminal 1 is now dead!
    * *Talking Point*: "Now, imagine our staging backend or third-party database crashes. Terminal 1 is completely terminated."
-2. Switch to the Browser and click **"🔄 Refresh Catalogue"**:
+2. **The Incontrovertible Anti-DevTools Proof (Run on camera)**:
+   * Run in terminal:
+     ```bash
+     curl -i http://localhost:4000/api/products
+     ```
+   * Show the OS terminal error: `Failed to connect to localhost port 4000: Connection refused`.
+   * *Talking Point*: "To prove this isn't a browser DevTools trick or client-side mock, curl to port 4000 fails immediately with Connection Refused."
+3. Switch to the Browser and click **"🔄 Refresh Catalogue"**:
    * The products **still load instantly in < 1ms** with `X-Cache: HIT`!
-   * *Talking Point*: "Even with the origin server completely dead, our frontend continues working without disruption thanks to Boombox's RFC 9111 cache."
+   * *Talking Point*: "Yet our frontend on port 3000 loads the full catalogue in 0.8ms from Boombox's RFC 9111 memory cache."
+
 
 ---
 
@@ -93,7 +101,14 @@ Arrange your screen into **3 terminal panes** and **1 browser window**:
    * Boombox intercepts the payment and returns 503.
    * The React cart immediately displays a red error banner:
      `🚨 Payment Gateway Failure! HTTP 503: Simulated chaos route override`
-   * *Talking Point*: "Our payment error boundary caught the 503 error immediately, enabling QA to test recovery flows on demand."
+3. **The Anti-DevTools CLI Proof (Run on camera)**:
+   * Run in terminal to prove the 503 is coming from the proxy socket, not a hacked React script:
+     ```bash
+     curl -i -X POST http://localhost:3000/api/checkout/pay
+     ```
+   * Terminal prints `HTTP/1.1 503 Service Unavailable`, `X-Chaos: OVERRIDE=503`.
+   * *Talking Point*: "And running the exact same request via raw curl outside the browser confirms the 503 error is emitted directly by the Boombox TCP reverse proxy, completely independent of the frontend."
+
 
 ---
 
