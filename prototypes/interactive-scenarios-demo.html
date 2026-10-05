@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Boombox Team Scenarios Interactive Prototype</title>
+  <style>
+    :root {
+      --bg: #090d16;
+      --card-bg: #111726;
+      --panel-bg: #0d121f;
+      --border: #1e293b;
+      --text: #e2e8f0;
+      --text-dim: #94a3b8;
+      --accent: #38bdf8;
+      --accent-glow: rgba(56, 189, 248, 0.2);
+      --green: #4ade80;
+      --yellow: #facc15;
+      --red: #f87171;
+      --mono: 'JetBrains Mono', 'Fira Code', monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      padding: 24px;
+    }
+
+    .container {
+      max-width: 1080px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    header {
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 16px;
+    }
+
+    h1 {
+      font-size: 24px;
+      font-weight: 700;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .question-banner {
+      background: var(--panel-bg);
+      border-left: 4px solid var(--accent);
+      padding: 12px 16px;
+      border-radius: 4px;
+      margin-top: 10px;
+      font-size: 14px;
+      color: var(--text-dim);
+    }
+    .question-banner strong { color: #fff; }
+
+    /* Layout Columns */
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    @media (max-width: 800px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .card-title {
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-dim);
+      font-weight: 700;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    /* Tabs */
+    .tab-bar {
+      display: flex;
+      gap: 8px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 8px;
+    }
+
+    .tab-btn {
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--text-dim);
+      padding: 6px 12px;
+      font-size: 13px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: all 0.15s;
+    }
+
+    .tab-btn:hover { color: #fff; background: var(--panel-bg); }
+    .tab-btn.active {
+      color: var(--accent);
+      background: var(--panel-bg);
+      border-color: var(--border);
+    }
+
+    /* Buttons */
+    .btn-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .btn {
+      background: #1e293b;
+      color: #fff;
+      border: 1px solid #334155;
+      padding: 8px 14px;
+      font-size: 13px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s;
+    }
+
+    .btn:hover {
+      background: #334155;
+      border-color: var(--accent);
+    }
+
+    .btn-primary {
+      background: #0284c7;
+      border-color: #38bdf8;
+    }
+    .btn-primary:hover { background: #0369a1; }
+
+    .btn-danger {
+      background: #991b1b;
+      border-color: #f87171;
+    }
+
+    /* Terminal Output Panel */
+    .terminal {
+      background: #040711;
+      border: 1px solid #1e293b;
+      border-radius: 6px;
+      padding: 12px;
+      font-family: var(--mono);
+      font-size: 12px;
+      color: #a5f3fc;
+      min-height: 220px;
+      max-height: 340px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+
+    /* State Inspector */
+    .state-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .state-table th, .state-table td {
+      padding: 6px 10px;
+      text-align: left;
+      border-bottom: 1px solid #1e293b;
+    }
+
+    .state-table th { color: var(--text-dim); font-weight: 500; }
+    .state-table td { font-family: var(--mono); }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .badge-miss { background: rgba(250, 204, 21, 0.2); color: var(--yellow); }
+    .badge-hit { background: rgba(74, 222, 128, 0.2); color: var(--green); }
+    .badge-replay { background: rgba(56, 189, 248, 0.2); color: var(--accent); }
+    .badge-chaos { background: rgba(248, 113, 113, 0.2); color: var(--red); }
+
+    .scenario-desc {
+      font-size: 13px;
+      color: var(--text-dim);
+      line-height: 1.5;
+      background: var(--panel-bg);
+      padding: 10px;
+      border-radius: 6px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <header>
+    <h1>📻 Boombox Team Scenarios Prototype</h1>
+    <div class="question-banner">
+      <strong>Prototyping Question:</strong> How do different engineering personas (Frontend, CI/CD, QA, and Microservices) drive Boombox state to eliminate latency, prevent network flakiness, and simulate outages?
+    </div>
+  </header>
+
+  <!-- Guided Walkthrough Tabs -->
+  <div class="tab-bar">
+    <button class="tab-btn active" onclick="selectScenario('frontend')">1. Frontend Dev (Cache HIT/MISS)</button>
+    <button class="tab-btn" onclick="selectScenario('cicd')">2. CI/CD Platform (VCR Offline)</button>
+    <button class="tab-btn" onclick="selectScenario('qa')">3. QA & SRE (Chaos Injection)</button>
+    <button class="tab-btn" onclick="selectScenario('multi')">4. Microservices (Multi-Origin)</button>
+  </div>
+
+  <div class="grid">
+    <!-- Left Column: Controls & Scenario Steps -->
+    <div class="card">
+      <div class="card-title">
+        <span id="scenario-title">Scenario 1: Frontend Developer</span>
+        <button class="btn" style="padding: 2px 8px; font-size: 11px;" onclick="resetState()">↺ Reset State</button>
+      </div>
+
+      <div class="scenario-desc" id="scenario-desc">
+        Clicking <strong>Step 1</strong> simulates the initial UI load (Cache MISS from slow staging). Clicking <strong>Step 2</strong> simulates page refresh, serving stored response instantly from RAM (0.2ms).
+      </div>
+
+      <div class="card-title">Interactive Actions</div>
+      <div class="btn-group" id="action-buttons">
+        <!-- Injected via JS based on selected scenario -->
+      </div>
+
+      <div class="card-title">Free-Play Controls</div>
+      <div class="btn-group">
+        <button class="btn" onclick="dispatchAction('FETCH_USER')">GET /api/user</button>
+        <button class="btn" onclick="dispatchAction('FETCH_CHECKOUT')">POST /checkout</button>
+        <button class="btn" onclick="dispatchAction('TOGGLE_CHAOS')">Toggle Chaos (250ms + 503)</button>
+        <button class="btn btn-danger" onclick="dispatchAction('KILL_ORIGIN')">Toggle Kill Origin</button>
+        <button class="btn" onclick="dispatchAction('CLEAR_CACHE')">Clear Cache</button>
+      </div>
+    </div>
+
+    <!-- Right Column: System State Inspector & Telemetry Log -->
+    <div class="card">
+      <div class="card-title">
+        <span>Boombox State Inspector</span>
+        <span id="hit-rate-badge" class="badge badge-hit">Hit Ratio: 0%</span>
+      </div>
+
+      <table class="state-table">
+        <tr><th>Origin Host:</th><td id="state-origin">https://api.staging.internal</td></tr>
+        <tr><th>Origin Status:</th><td id="state-origin-status" style="color: var(--green);">ONLINE</td></tr>
+        <tr><th>Active Mode:</th><td id="state-mode">CACHE (Default)</td></tr>
+        <tr><th>Storage Partition:</th><td id="state-cache-count">0 representations</td></tr>
+        <tr><th>Last Signal:</th><td id="state-signal">-</td></tr>
+        <tr><th>Last Latency:</th><td id="state-latency">-</td></tr>
+      </table>
+
+      <div class="card-title">Live Terminal Stream</div>
+      <div class="terminal" id="terminal-log">Waiting for action... Click a scenario step above.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ==================================================================================
+// ISOLATED LOGIC MODULE (Portable Pure State Model per LOGIC.md)
+// ==================================================================================
+const initialState = {
+  origin: 'https://api.staging.internal',
+  originOnline: true,
+  mode: 'CACHE', // 'CACHE' | 'VCR_RECORD' | 'VCR_REPLAY'
+  cache: new Map(),
+  chaosEnabled: false,
+  chaosDelay: 250,
+  chaosOverridePath: '/checkout',
+  totalRequests: 0,
+  cacheHits: 0,
+  lastTransaction: null
+};
+
+let state = { ...initialState, cache: new Map() };
+
+function boomboxReducer(curr, action) {
+  const next = { ...curr };
+  const startTime = performance.now();
+
+  switch (action.type) {
+    case 'RESET':
+      return { ...initialState, cache: new Map() };
+
+    case 'SET_MODE':
+      next.mode = action.mode;
+      return next;
+
+    case 'TOGGLE_ORIGIN':
+      next.originOnline = !next.originOnline;
+      return next;
+
+    case 'TOGGLE_CHAOS':
+      next.chaosEnabled = !next.chaosEnabled;
+      return next;
+
+    case 'CLEAR_CACHE':
+      next.cache.clear();
+      next.lastTransaction = { type: 'CLEAR', signal: 'PURGE', latencyMs: 0.1 };
+      return next;
+
+    case 'REQUEST': {
+      next.totalRequests++;
+      const key = `${action.method}:${action.url}`;
+
+      // 1. Chaos Simulation
+      if (next.chaosEnabled) {
+        if (action.url === next.chaosOverridePath) {
+          next.lastTransaction = {
+            method: action.method,
+            url: action.url,
+            status: 503,
+            signal: 'CHAOS=503',
+            latencyMs: next.chaosDelay,
+            body: { error: 'Service Unavailable (Simulated Outage)' }
+          };
+          return next;
+        }
+      }
+
+      // 2. VCR Replay or Cache Lookup
+      if (next.cache.has(key)) {
+        next.cacheHits++;
+        const cached = next.cache.get(key);
+        next.lastTransaction = {
+          method: action.method,
+          url: action.url,
+          status: cached.status,
+          signal: next.mode === 'VCR_REPLAY' ? 'REPLAY' : 'HIT',
+          latencyMs: 0.2, // Sub-millisecond in-memory speed
+          body: cached.body
+        };
+        return next;
+      }
+
+      // 3. Replay Mode Miss -> Fails Fast with 502
+      if (next.mode === 'VCR_REPLAY') {
+        next.lastTransaction = {
+          method: action.method,
+          url: action.url,
+          status: 502,
+          signal: 'MISS',
+          latencyMs: 0.1,
+          body: { error: 'VCR Replay Miss: Interaction not recorded in cassette' }
+        };
+        return next;
+      }
+
+      // 4. Origin Network Call (Check if origin is online)
+      if (!next.originOnline) {
+        next.lastTransaction = {
+          method: action.method,
+          url: action.url,
+          status: 502,
+          signal: 'ERROR',
+          latencyMs: 15.0,
+          body: { error: 'Bad Gateway: Upstream origin is offline' }
+        };
+        return next;
+      }
+
+      // 5. Origin Success & Cache Store
+      const responsePayload = action.url === '/api/user'
+        ? { id: 42, name: 'Alex Developer', role: 'Frontend Engineer' }
+        : { orderId: 'ord_998877', status: 'PAID' };
+
+      next.cache.set(key, { status: 200, body: responsePayload });
+      next.lastTransaction = {
+        method: action.method,
+        url: action.url,
+        status: 200,
+        signal: next.mode === 'VCR_RECORD' ? 'RECORD' : 'MISS',
+        latencyMs: 120.0, // Simulated network RTT
+        body: responsePayload
+      };
+      return next;
+    }
+
+    default:
+      return curr;
+  }
+}
+
+// ==================================================================================
+// UI CONTROLLER & SCENARIOS
+// ==================================================================================
+let activeScenario = 'frontend';
+
+const scenarios = {
+  frontend: {
+    title: 'Scenario 1: Frontend Developer (Eliminate Staging Latency)',
+    desc: 'Watch how Boombox shields slow staging backends. <strong>Step 1</strong> performs an initial request (MISS, 120ms). <strong>Step 2</strong> re-fetches from local cache (HIT, 0.2ms).',
+    steps: [
+      { label: 'Step 1: Initial Page Load (GET /api/user)', action: () => dispatchAction('FETCH_USER') },
+      { label: 'Step 2: Refresh Page (GET /api/user)', action: () => dispatchAction('FETCH_USER') }
+    ]
+  },
+  cicd: {
+    title: 'Scenario 2: CI/CD Platform (Zero-Flake Offline Tests)',
+    desc: 'Record interactions into a cassette once, simulate total external API outage, then replay 100% offline at wire speed.',
+    steps: [
+      { label: 'Step 1: Record Stripe API into Cassette', action: () => {
+        state = boomboxReducer(state, { type: 'SET_MODE', mode: 'VCR_RECORD' });
+        dispatchAction('FETCH_CHECKOUT');
+      }},
+      { label: 'Step 2: Simulate Outage (Kill Origin Server)', action: () => {
+        state = boomboxReducer(state, { type: 'SET_MODE', mode: 'VCR_REPLAY' });
+        state = boomboxReducer(state, { type: 'TOGGLE_ORIGIN' });
+        render();
+        logToTerminal('[SIMULATION] 💥 Origin server is now 100% OFFLINE.');
+      }},
+      { label: 'Step 3: Run CI Test Suite (Replay Offline)', action: () => dispatchAction('FETCH_CHECKOUT') }
+    ]
+  },
+  qa: {
+    title: 'Scenario 3: QA & SRE (Fault & Chaos Injection)',
+    desc: 'Simulate edge cases (e.g. checkout outage) without asking backend teams to deploy broken code.',
+    steps: [
+      { label: 'Step 1: Inject 503 Override on /checkout', action: () => {
+        state = boomboxReducer(state, { type: 'TOGGLE_CHAOS' });
+        render();
+        logToTerminal('[QA CONFIG] Injected X-Boombox-Chaos-Override: /checkout:503');
+      }},
+      { label: 'Step 2: Trigger Checkout Flow', action: () => dispatchAction('FETCH_CHECKOUT') }
+    ]
+  },
+  multi: {
+    title: 'Scenario 4: Microservices (Multi-Origin Transparent Proxying)',
+    desc: 'Proxy across multiple APIs (DummyJSON & GitHub) through a single endpoint with partitioned cache keys.',
+    steps: [
+      { label: 'Step 1: Fetch DummyJSON via /https://dummyjson.com/products/1', action: () => {
+        state = boomboxReducer(state, { type: 'REQUEST', method: 'GET', url: 'https://dummyjson.com/products/1' });
+        render();
+      }},
+      { label: 'Step 2: Fetch GitHub Zen via /https://api.github.com/zen', action: () => {
+        state = boomboxReducer(state, { type: 'REQUEST', method: 'GET', url: 'https://api.github.com/zen' });
+        render();
+      }}
+    ]
+  }
+};
+
+function selectScenario(key) {
+  activeScenario = key;
+  document.querySelectorAll('.tab-btn').forEach((b, i) => {
+    b.classList.toggle('active', Object.keys(scenarios)[i] === key);
+  });
+
+  const sc = scenarios[key];
+  document.getElementById('scenario-title').innerText = sc.title;
+  document.getElementById('scenario-desc').innerHTML = sc.desc;
+
+  const btnContainer = document.getElementById('action-buttons');
+  btnContainer.innerHTML = '';
+  sc.steps.forEach(step => {
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-primary';
+    btn.innerText = step.label;
+    btn.onclick = step.action;
+    btnContainer.appendChild(btn);
+  });
+}
+
+function dispatchAction(type) {
+  if (type === 'FETCH_USER') state = boomboxReducer(state, { type: 'REQUEST', method: 'GET', url: '/api/user' });
+  if (type === 'FETCH_CHECKOUT') state = boomboxReducer(state, { type: 'REQUEST', method: 'POST', url: '/checkout' });
+  if (type === 'TOGGLE_CHAOS') state = boomboxReducer(state, { type: 'TOGGLE_CHAOS' });
+  if (type === 'KILL_ORIGIN') state = boomboxReducer(state, { type: 'TOGGLE_ORIGIN' });
+  if (type === 'CLEAR_CACHE') state = boomboxReducer(state, { type: 'CLEAR_CACHE' });
+  render();
+}
+
+function resetState() {
+  state = boomboxReducer(state, { type: 'RESET' });
+  render();
+  logToTerminal('[RESET] System state cleared to defaults.');
+}
+
+function logToTerminal(msg) {
+  const term = document.getElementById('terminal-log');
+  term.innerText += `\n${msg}`;
+  term.scrollTop = term.scrollHeight;
+}
+
+function render() {
+  document.getElementById('state-origin').innerText = state.origin;
+  const statusEl = document.getElementById('state-origin-status');
+  statusEl.innerText = state.originOnline ? 'ONLINE' : 'OFFLINE (SIMULATED)';
+  statusEl.style.color = state.originOnline ? 'var(--green)' : 'var(--red)';
+
+  document.getElementById('state-mode').innerText = state.mode + (state.chaosEnabled ? ' + CHAOS_ENABLED' : '');
+  document.getElementById('state-cache-count').innerText = `${state.cache.size} representations in memory`;
+
+  const hitRate = state.totalRequests > 0 ? Math.round((state.cacheHits / state.totalRequests) * 100) : 0;
+  document.getElementById('hit-rate-badge').innerText = `Hit Ratio: ${hitRate}%`;
+
+  if (state.lastTransaction) {
+    const tx = state.lastTransaction;
+    document.getElementById('state-signal').innerText = tx.signal;
+    document.getElementById('state-latency').innerText = `${tx.latencyMs.toFixed(1)} ms`;
+
+    const badgeClass = tx.signal === 'HIT' ? 'badge-hit' : (tx.signal === 'MISS' ? 'badge-miss' : (tx.signal === 'REPLAY' ? 'badge-replay' : 'badge-chaos'));
+    logToTerminal(`[${new Date().toLocaleTimeString()}] ${tx.method} ${tx.url} -> ${tx.status} | Signal: ${tx.signal} | Latency: ${tx.latencyMs.toFixed(1)}ms`);
+    if (tx.body) {
+      logToTerminal(`  Payload: ${JSON.stringify(tx.body)}`);
+    }
+  }
+}
+
+// Initial setup
+selectScenario('frontend');
+render();
+</script>
+
+</body>
+</html>

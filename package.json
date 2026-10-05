@@ -22,7 +22,9 @@
   "type": "module",
   "scripts": {
     "start": "bun bin/boombox.js",
-    "test": "bun test"
+    "test": "bun test",
+    "demo:cli": "bun prototypes/cli-scenarios-demo.js",
+    "demo:react": "cd examples/react-app && bun dev"
   },
   "repository": {
     "type": "git",
